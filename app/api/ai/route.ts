@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { buildAnthropicMessagesUrl, buildOpenAIChatCompletionsUrl } from "@/lib/ai-endpoints";
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 type BihangMethod = {
   name: string;
   standard: string;
