@@ -1,3 +1,6 @@
+"use client";
+
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { buildAnthropicMessagesUrl, buildOpenAIChatCompletionsUrl } from "./ai-endpoints";
 import { toDisplayList, toDisplayText } from "./ai-display";
 import { readSavedAiConfig } from "./default-ai-config";
@@ -43,9 +46,7 @@ export function getSavedAiHeaders() {
 }
 
 function isNativeRuntime() {
-  if (typeof window === "undefined") return false;
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return Boolean(cap?.isNativePlatform?.());
+  return Capacitor.isNativePlatform();
 }
 
 function extractBalancedJson(text: string) {
@@ -177,14 +178,8 @@ function buildPrompt(body: AiBody, hasImages: boolean) {
 }
 
 async function nativePostJson(url: string, headers: Record<string, string>, data: unknown) {
-  const http = (window as unknown as {
-    CapacitorHttp?: {
-      post: (options: { url: string; headers?: Record<string, string>; data?: unknown; connectTimeout?: number; readTimeout?: number }) => Promise<{ status: number; data: unknown }>;
-    };
-  }).CapacitorHttp;
-
-  if (http?.post) {
-    const response = await http.post({ url, headers, data, connectTimeout: 120000, readTimeout: 120000 });
+  if (isNativeRuntime()) {
+    const response = await CapacitorHttp.post({ url, headers, data, connectTimeout: 120000, readTimeout: 120000 });
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`AI API error [${response.status}]: ${typeof response.data === "string" ? response.data : JSON.stringify(response.data)}`);
     }

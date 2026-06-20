@@ -1,5 +1,6 @@
 "use client";
 
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { buildOpenAIImageGenerationsUrl } from "./ai-endpoints";
 import { readSavedImageConfig } from "./default-ai-config";
 
@@ -11,9 +12,7 @@ const COMIC_SYSTEM_PROMPT =
 type ImageBody = Record<string, unknown>;
 
 function isNativeRuntime() {
-  if (typeof window === "undefined") return false;
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return Boolean(cap?.isNativePlatform?.());
+  return Capacitor.isNativePlatform();
 }
 
 function authHeaders(apiKey: string, authScheme: string) {
@@ -38,14 +37,8 @@ function pickImage(data: unknown) {
 }
 
 async function nativePostJson(url: string, headers: Record<string, string>, data: unknown) {
-  const http = (window as unknown as {
-    CapacitorHttp?: {
-      post: (options: { url: string; headers?: Record<string, string>; data?: unknown; connectTimeout?: number; readTimeout?: number }) => Promise<{ status: number; data: unknown }>;
-    };
-  }).CapacitorHttp;
-
-  if (http?.post) {
-    const response = await http.post({ url, headers, data, connectTimeout: 180000, readTimeout: 180000 });
+  if (isNativeRuntime()) {
+    const response = await CapacitorHttp.post({ url, headers, data, connectTimeout: 180000, readTimeout: 180000 });
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Image API error [${response.status}]: ${typeof response.data === "string" ? response.data : JSON.stringify(response.data)}`);
     }
