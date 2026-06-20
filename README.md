@@ -34,7 +34,9 @@ npm run dev
 - `IMAGE_API_KEY`
 - `IMAGE_MODEL`
 
-`NEXT_PUBLIC_*` 变量会进入前端构建产物，只能放公开默认值，不要放真实密钥。
+默认应把真实 Key 放在服务端环境变量中，由 `/api/ai` 和 `/api/image` 代理调用。`NEXT_PUBLIC_*` 变量会进入前端构建产物，只能放公开默认值，不要放真实密钥。
+
+`EMBED_PUBLIC_AI_KEYS=1` 会把 Key 注入静态前端包，仅适合完全私有的 APK/内部分发场景；公开网站和 GitHub Pages 不要开启。
 
 ## Web 构建
 
@@ -75,7 +77,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ## GitHub Pages 自定义域名
 
-本仓库也可以发布为静态站点，并绑定自定义域名，例如 `lhp.enener.com`。静态站点没有 Next.js 服务端 API，浏览器会在 `/api` 不可用时尝试直连设置页保存的 AI 接口；这要求模型接口允许浏览器跨域请求。需要完整稳定的 AI 代理能力时，优先使用 Vercel。
+本仓库也可以发布为静态站点，并绑定自定义域名，例如 `lhp.enener.com`。静态站点没有 Next.js 服务端 API，浏览器会在 `/api` 不可用时尝试直连设置页保存的 AI 接口；这要求模型接口允许浏览器跨域请求。需要隐藏 Key 并稳定使用文本/生图接口时，必须使用 Vercel、Node 服务器或其他支持服务端函数的部署方式。
 
 DNS 需要添加：
 

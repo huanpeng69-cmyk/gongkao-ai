@@ -106,7 +106,7 @@ export async function GET(req: Request) {
     testBody = JSON.stringify({
       model: aiModel || "gpt-4o-mini",
       messages: [{ role: "user", content: "Say 'ok'" }],
-      max_tokens: 10,
+      max_tokens: 256,
     });
   }
 
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
       const data = await res.json();
       const content = aiProvider === "anthropic"
         ? data.content?.[0]?.text || ""
-        : data.choices?.[0]?.message?.content || "";
+        : data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
       diagnostics.tests.push({
         name: "API连通性",
         status: "pass",

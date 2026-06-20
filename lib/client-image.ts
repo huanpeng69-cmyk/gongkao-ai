@@ -61,25 +61,22 @@ async function nativePostJson(url: string, headers: Record<string, string>, data
 
 export async function requestImage<T = Record<string, unknown>>(body: ImageBody): Promise<T> {
   const cfg = readSavedImageConfig();
-  if (!cfg.apiKey || !cfg.baseUrl) {
-    return {
-      error: "生图接口未配置",
-      detail: "请先在设置页填写生图 API Key 和 Base URL，或使用默认配置。",
-    } as T;
-  }
 
   if (!isNativeRuntime()) {
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const hasFrontendConfig = Boolean(cfg.apiKey && cfg.baseUrl);
+      if (hasFrontendConfig) {
+        headers["x-image-key"] = cfg.apiKey;
+        headers["x-image-base"] = cfg.baseUrl;
+        if (cfg.model) headers["x-image-model"] = cfg.model;
+        if (cfg.authScheme) headers["x-image-auth"] = cfg.authScheme;
+        if (cfg.size) headers["x-image-size"] = cfg.size;
+      }
+
       const res = await fetch("/api/image", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-image-key": cfg.apiKey,
-          "x-image-base": cfg.baseUrl,
-          "x-image-model": cfg.model,
-          "x-image-auth": cfg.authScheme,
-          "x-image-size": cfg.size,
-        },
+        headers,
         body: JSON.stringify({ ...body, size: body.size || cfg.size }),
       });
       if ((res.headers.get("content-type") || "").includes("application/json")) {
@@ -88,6 +85,13 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
     } catch {
       // Static hosts such as GitHub Pages do not provide Next.js API routes.
     }
+  }
+
+  if (!cfg.apiKey || !cfg.baseUrl) {
+    return {
+      error: "生图接口未配置",
+      detail: "请先在设置页填写生图 API Key 和 Base URL，或使用服务端环境变量配置。",
+    } as T;
   }
 
   const endpoint = buildOpenAIImageGenerationsUrl(cfg.baseUrl);

@@ -20,7 +20,6 @@ import { getErrorStats, getReviewPlan, loadData, resetTodayIfNeeded } from "@/li
 import { preloadImage } from "@/lib/image-optimizer";
 import { requestAi } from "@/lib/client-ai";
 import { requestImage } from "@/lib/client-image";
-import { readSavedImageConfig } from "@/lib/default-ai-config";
 
 type TutorResult = {
   source?: string;
@@ -391,15 +390,6 @@ function HomeTutorPanel() {
 
   const generateComic = async () => {
     if (!result) return;
-    const imageCfg = readSavedImageConfig();
-
-    if (!imageCfg.apiKey || !imageCfg.baseUrl) {
-      setComicResult({
-        error: "生图接口未配置",
-        detail: "请先到设置页填写漫画生图接口，或点击“沿用文字接口”。",
-      });
-      return;
-    }
 
     setComicLoading(true);
     setComicResult(null);

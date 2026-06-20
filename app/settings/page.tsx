@@ -36,7 +36,7 @@ const PRESETS: Record<string, Partial<ProviderConfig>> = {
   anthropic: { name: "Anthropic", baseUrl: "https://api.anthropic.com", authScheme: "x-api-key", protocol: "anthropic", model: "claude-sonnet-4-20250514" },
   deepseek: { name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", authScheme: "bearer", protocol: "openai", model: "deepseek-chat" },
   qwen: { name: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", authScheme: "bearer", protocol: "openai", model: "qwen-plus" },
-  xiaomi: { name: "小米MiMo", baseUrl: "https://api.xiaomi.com/v1", authScheme: "bearer", protocol: "openai", model: "mimo" },
+  xiaomi: { name: "小米MiMo", baseUrl: "https://token-plan-cn.xiaomimimo.com", authScheme: "bearer", protocol: "openai", model: "mimo-v2.5" },
 };
 
 const IMAGE_SIZE_OPTIONS = ["1024x1024", "1024x1536", "1536x1024"];

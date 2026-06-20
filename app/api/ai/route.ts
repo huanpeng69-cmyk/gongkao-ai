@@ -594,12 +594,6 @@ export async function POST(request: Request) {
 
     // 从请求头读取前端配置
     const headers = request.headers;
-    const hasFrontendConfigHeaders =
-      headers.has("x-ai-key") ||
-      headers.has("x-ai-base") ||
-      headers.has("x-ai-model") ||
-      headers.has("x-ai-provider") ||
-      headers.has("x-ai-auth");
     const frontendConfig = {
       apiKey: headers.get("x-ai-key") || "",
       baseUrl: headers.get("x-ai-base") || "",
@@ -607,6 +601,7 @@ export async function POST(request: Request) {
       authScheme: headers.get("x-ai-auth") || "bearer",
       protocol: headers.get("x-ai-provider") || "openai",
     };
+    const hasFrontendConfigHeaders = Boolean(frontendConfig.apiKey && frontendConfig.baseUrl);
 
     const effectiveConfig = getEffectiveAiConfig(frontendConfig, hasFrontendConfigHeaders);
     const provider = getEffectiveAiProvider(effectiveConfig, true);

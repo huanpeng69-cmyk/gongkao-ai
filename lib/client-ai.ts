@@ -29,14 +29,17 @@ function getSavedAiConfig(): AiConfig {
 
 export function getSavedAiHeaders() {
   const cfg = getSavedAiConfig();
-  return {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "x-ai-provider": cfg.protocol,
-    "x-ai-key": cfg.apiKey,
-    "x-ai-base": cfg.baseUrl,
-    "x-ai-model": cfg.model,
-    "x-ai-auth": cfg.authScheme,
   };
+
+  if (cfg.protocol) headers["x-ai-provider"] = cfg.protocol;
+  if (cfg.apiKey) headers["x-ai-key"] = cfg.apiKey;
+  if (cfg.baseUrl) headers["x-ai-base"] = cfg.baseUrl;
+  if (cfg.model) headers["x-ai-model"] = cfg.model;
+  if (cfg.authScheme) headers["x-ai-auth"] = cfg.authScheme;
+
+  return headers;
 }
 
 function isNativeRuntime() {

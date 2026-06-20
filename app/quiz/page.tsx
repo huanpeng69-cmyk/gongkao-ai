@@ -20,7 +20,6 @@ import { preloadImages } from "@/lib/image-optimizer";
 import { loadQuestionBank } from "@/lib/question-bank-client";
 import { requestAi } from "@/lib/client-ai";
 import { requestImage } from "@/lib/client-image";
-import { readSavedImageConfig } from "@/lib/default-ai-config";
 import {
   answerToText,
   buildQuestionPromptText,
@@ -459,19 +458,7 @@ export default function QuestionBankPage() {
   };
 
   const requestComicImage = async (question: PracticeQuestion) => {
-    const imageCfg = readSavedImageConfig();
     const answer = answers[question.id];
-
-    if (!imageCfg.apiKey || !imageCfg.baseUrl) {
-      setComicResults((prev) => ({
-        ...prev,
-        [question.id]: {
-          error: "生图接口未配置",
-          detail: "请先在设置页填写漫画生图接口，或点击“沿用文字接口”。",
-        },
-      }));
-      return;
-    }
 
     const content = buildComicContent(question, answer, aiResults[question.id]);
     const body = {
