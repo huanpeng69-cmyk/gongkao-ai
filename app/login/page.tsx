@@ -47,6 +47,9 @@ export default function LoginPage() {
       }
 
       goNext();
+    } catch (err) {
+      console.error(err);
+      setError("操作失败，请刷新页面后重试");
     } finally {
       setSubmitting(false);
     }

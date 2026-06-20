@@ -34,14 +34,47 @@ function saveUsers(users: UsersMap) {
 
 function randomSalt() {
   const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
+  const cryptoSource = globalThis.crypto;
+  if (cryptoSource?.getRandomValues) {
+    cryptoSource.getRandomValues(bytes);
+    return Array.from(bytes).map((item) => item.toString(16).padStart(2, "0")).join("");
+  }
+
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Math.floor(Math.random() * 256);
+  }
   return Array.from(bytes).map((item) => item.toString(16).padStart(2, "0")).join("");
 }
 
 async function sha256(value: string) {
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join("");
+  const cryptoSource = globalThis.crypto;
+  if (cryptoSource?.subtle?.digest && typeof TextEncoder !== "undefined") {
+    const data = new TextEncoder().encode(value);
+    const digest = await cryptoSource.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join("");
+  }
+
+  // GitHub Pages may be opened over HTTP before HTTPS is issued; Web Crypto is unavailable there.
+  return fallbackHash(value);
+}
+
+function fallbackHash(value: string) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  let h3 = 0x85ebca6b;
+  let h4 = 0xc2b2ae35;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 0x01000193);
+    h2 = Math.imul(h2 ^ code, 0x85ebca6b);
+    h3 = Math.imul(h3 ^ code, 0xc2b2ae35);
+    h4 = Math.imul(h4 ^ code, 0x27d4eb2f);
+  }
+
+  return [h1, h2, h3, h4]
+    .map((item) => (item >>> 0).toString(16).padStart(8, "0"))
+    .join("");
 }
 
 async function hashPassword(password: string, salt: string) {

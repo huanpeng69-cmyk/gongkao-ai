@@ -25,7 +25,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
     if (!isAuthenticated()) {
       const next = currentPath !== "/" ? `?next=${encodeURIComponent(currentPath)}` : "";
-      router.replace(`/login/${next}`);
+      router.replace(`/login${next}`);
       setReady(false);
       return;
     }
