@@ -73,6 +73,18 @@ android/app/build/outputs/apk/debug/app-debug.apk
 4. 如果需要服务端 AI 兜底配置，在 Vercel Project Settings 里添加环境变量。
 5. 不要把 `.env`、APK、构建目录或日志提交到仓库。
 
+## GitHub Pages 自定义域名
+
+本仓库也可以发布为静态站点，并绑定自定义域名，例如 `lhp.enener.com`。静态站点没有 Next.js 服务端 API，浏览器会在 `/api` 不可用时尝试直连设置页保存的 AI 接口；这要求模型接口允许浏览器跨域请求。需要完整稳定的 AI 代理能力时，优先使用 Vercel。
+
+DNS 需要添加：
+
+```text
+类型: CNAME
+名称: lhp
+值: huanpeng69-cmyk.github.io
+```
+
 ## 安全说明
 
 - 仓库只保留 `.env.example`，真实 `.env` 已被忽略。

@@ -256,18 +256,25 @@ async function callDirectAi(body: AiBody, imageInputs: string[]) {
 }
 
 export async function requestAi(body: AiBody) {
-  if (!isNativeRuntime()) {
-    const res = await fetch("/api/ai", {
-      method: "POST",
-      headers: getSavedAiHeaders(),
-      body: JSON.stringify(body),
-    });
-    return res.json();
-  }
-
   const imageInputs = [body.images, body.imageDataUrl, body.imageDataUrls, body.imageUrls]
     .flat()
     .map((item) => String(item || "").trim())
     .filter((item) => item.startsWith("data:image/") || /^https?:\/\//i.test(item));
+
+  if (!isNativeRuntime()) {
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: getSavedAiHeaders(),
+        body: JSON.stringify(body),
+      });
+      if ((res.headers.get("content-type") || "").includes("application/json")) {
+        return res.json();
+      }
+    } catch {
+      // Static hosts such as GitHub Pages do not provide Next.js API routes.
+    }
+  }
+
   return callDirectAi(body, Array.from(new Set(imageInputs)));
 }

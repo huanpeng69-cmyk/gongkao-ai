@@ -69,28 +69,43 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
   }
 
   if (!isNativeRuntime()) {
-    const res = await fetch("/api/image", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-image-key": cfg.apiKey,
-        "x-image-base": cfg.baseUrl,
-        "x-image-model": cfg.model,
-        "x-image-auth": cfg.authScheme,
-        "x-image-size": cfg.size,
-      },
-      body: JSON.stringify({ ...body, size: body.size || cfg.size }),
-    });
-    return res.json();
+    try {
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-image-key": cfg.apiKey,
+          "x-image-base": cfg.baseUrl,
+          "x-image-model": cfg.model,
+          "x-image-auth": cfg.authScheme,
+          "x-image-size": cfg.size,
+        },
+        body: JSON.stringify({ ...body, size: body.size || cfg.size }),
+      });
+      if ((res.headers.get("content-type") || "").includes("application/json")) {
+        return res.json();
+      }
+    } catch {
+      // Static hosts such as GitHub Pages do not provide Next.js API routes.
+    }
   }
 
   const endpoint = buildOpenAIImageGenerationsUrl(cfg.baseUrl);
   const prompt = `${COMIC_SYSTEM_PROMPT}\n\n${String(body.content || "")}`;
-  const data = await nativePostJson(
-    endpoint,
-    authHeaders(cfg.apiKey, cfg.authScheme),
-    { model: cfg.model || "gpt-image-1", prompt, size: String(body.size || cfg.size || "1024x1024"), n: 1 },
-  );
+  let data: unknown;
+  try {
+    data = await nativePostJson(
+      endpoint,
+      authHeaders(cfg.apiKey, cfg.authScheme),
+      { model: cfg.model || "gpt-image-1", prompt, size: String(body.size || cfg.size || "1024x1024"), n: 1 },
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      error: "生图接口调用失败",
+      detail,
+    } as T;
+  }
   const image = pickImage(data);
 
   if (!image.imageUrl && !image.b64Json) {
