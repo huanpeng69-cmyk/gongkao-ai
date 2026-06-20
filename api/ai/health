@@ -1,0 +1,1 @@
+{"status":"static-mobile","diagnostics":{"timestamp":"2026-06-20T11:16:04.844Z","suggestion":"Mobile APK builds use the saved AI settings directly from the app.","tests":[{"name":"移动端静态导出","status":"skip","detail":"APK 内不使用 Next.js 服务端健康检查接口"}]}}
