@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片加载测试</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ccc;
+            margin: 10px 0;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>图片加载测试</h1>
+
+    <div class="test-section">
+        <h2>测试 1: 粉笔题库图片（常见格式）</h2>
+        <div id="test1-status" class="status info">正在加载...</div>
+        <img id="test1-img"
+             src="//tiku-cdn.fbcontent.cn/images/hc_01ac1e1f-db62-442f-a3b5-0afb8f0c5e44.png"
+             loading="lazy"
+             decoding="async"
+             onerror="document.getElementById('test1-status').className='status error';document.getElementById('test1-status').innerText='❌ 加载失败: ' + this.src"
+             onload="document.getElementById('test1-status').className='status success';document.getElementById('test1-status').innerText='✅ 加载成功: ' + this.src">
+    </div>
+
+    <div class="test-section">
+        <h2>测试 2: HTTPS 协议图片</h2>
+        <div id="test2-status" class="status info">正在加载...</div>
+        <img id="test2-img"
+             src="https://tiku-cdn.fbcontent.cn/images/hc_01ac1e1f-db62-442f-a3b5-0afb8f0c5e44.png"
+             loading="lazy"
+             decoding="async"
+             onerror="document.getElementById('test2-status').className='status error';document.getElementById('test2-status').innerText='❌ 加载失败: ' + this.src"
+             onload="document.getElementById('test2-status').className='status success';document.getElementById('test2-status').innerText='✅ 加载成功: ' + this.src">
+    </div>
+
+    <div class="test-section">
+        <h2>测试 3: 公开图片（对照组）</h2>
+        <div id="test3-status" class="status info">正在加载...</div>
+        <img id="test3-img"
+             src="https://via.placeholder.com/400x300.png?text=Test+Image"
+             loading="lazy"
+             decoding="async"
+             onerror="document.getElementById('test3-status').className='status error';document.getElementById('test3-status').innerText='❌ 加载失败: ' + this.src"
+             onload="document.getElementById('test3-status').className='status success';document.getElementById('test3-status').innerText='✅ 加载成功: ' + this.src">
+    </div>
+
+    <div class="test-section">
+        <h2>控制台信息</h2>
+        <div id="console" style="background: #f5f5f5; padding: 10px; font-family: monospace; white-space: pre-wrap;"></div>
+    </div>
+
+    <script>
+        // 捕获控制台错误
+        const consoleLog = document.getElementById('console');
+        const originalError = console.error;
+        console.error = function(...args) {
+            consoleLog.textContent += '\n[ERROR] ' + args.join(' ');
+            originalError.apply(console, args);
+        };
+
+        // 监听所有图片加载事件
+        window.addEventListener('error', function(e) {
+            if (e.target.tagName === 'IMG') {
+                consoleLog.textContent += '\n[IMG ERROR] ' + e.target.src;
+            }
+        }, true);
+
+        // 输出当前页面信息
+        consoleLog.textContent = '当前页面: ' + window.location.href + '\n';
+        consoleLog.textContent += '用户代理: ' + navigator.userAgent + '\n';
+        consoleLog.textContent += '---开始加载图片---\n';
+    </script>
+</body>
+</html>

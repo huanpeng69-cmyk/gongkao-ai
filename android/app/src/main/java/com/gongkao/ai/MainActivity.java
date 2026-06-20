@@ -1,0 +1,5 @@
+package com.gongkao.ai;
+
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {}
