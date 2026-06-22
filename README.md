@@ -85,7 +85,16 @@ DNS 需要添加：
 类型: CNAME
 名称: lhp
 值: huanpeng69-cmyk.github.io
+代理: DNS only / 关闭代理
 ```
+
+域名异常时可本地执行：
+
+```bash
+npm run check:site
+```
+
+如果提示 `DNS record is missing`，说明 Cloudflare 里的 `lhp` 解析记录不存在或未生效，需要按上面的 CNAME 重新添加。
 
 ## 安全说明
 

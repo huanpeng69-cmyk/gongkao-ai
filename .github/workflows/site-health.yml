@@ -1,0 +1,31 @@
+name: Site Health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check DNS
+        run: |
+          set -euo pipefail
+          result="$(dig +short CNAME lhp.enener.com @8.8.8.8 || true)"
+          echo "$result"
+          if ! echo "$result" | grep -qi "huanpeng69-cmyk.github.io"; then
+            echo "::error::lhp.enener.com must be a CNAME to huanpeng69-cmyk.github.io"
+            exit 1
+          fi
+
+      - name: Check HTTP
+        run: |
+          set -euo pipefail
+          code="$(curl -L -sS -o /tmp/site.html -w "%{http_code}" --max-time 30 http://lhp.enener.com)"
+          echo "HTTP $code"
+          if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then
+            cat /tmp/site.html | head -c 500
+            exit 1
+          fi
+          grep -q "公考智学" /tmp/site.html || grep -q "公考私教" /tmp/site.html

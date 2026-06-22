@@ -9,7 +9,8 @@
     "prepare:mobile": "node scripts/prepare-mobile-assets.js",
     "build:mobile": "npm run prepare:mobile && set MOBILE_EXPORT=1&& next build",
     "android:sync": "npx cap sync android",
-    "apk:debug": "npm run build:mobile && npx cap sync android && cd android && gradlew assembleDebug"
+    "apk:debug": "npm run build:mobile && npx cap sync android && cd android && gradlew assembleDebug",
+    "check:site": "powershell -ExecutionPolicy Bypass -File scripts/check-site-health.ps1"
   },
   "dependencies": {
     "next": "^14.2.0",
