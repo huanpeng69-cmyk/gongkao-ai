@@ -2,6 +2,20 @@
 
 公考刷题、模考、错题复习、百宝箱工具和 AI 讲解一体化学习应用。项目基于 Next.js，移动端可通过 Capacitor 打包为 Android APK。
 
+## 界面预览
+
+![公考私教学习主页](docs/images/home-dashboard.png)
+学习主页：集中查看刷题数据、今日计划和 AI 私教讲解入口。
+
+![真题题库解析页](docs/images/question-bank-explanation.png)
+真题题库：展示作答结果、正确答案和粉笔解析内容。
+
+![AI 漫画讲解](docs/images/ai-comic-explanation.jpg)
+漫画讲解：把题目思路拆成分镜，便于复盘关键步骤。
+
+![备考百宝箱三视图训练](docs/images/toolbox-three-views.jpg)
+备考百宝箱：提供空间重构、截面图和三视图等训练工具。
+
 ## 功能
 
 - 真题题库：支持搜索、考试/年份/试卷筛选、材料题组练习。
