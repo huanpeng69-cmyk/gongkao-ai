@@ -4,6 +4,12 @@ export type AnswerValue = string | boolean | string[];
 
 const IMG_TAG_RE = /<img\b[^>]*>/gi;
 
+function normalizeChoiceText(value: string) {
+  const text = value.trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(text)) return value;
+  return Array.from(new Set(text.split(""))).sort().join("");
+}
+
 function normalizeSpace(value: string) {
   return value
     .replace(/\s*欢迎使用公开真题库[\s\S]*$/g, "")
@@ -69,12 +75,16 @@ export function normalizeHtmlImages(html = "") {
     .replace(/\bsrc\s*=\s*["']\/\//gi, 'src="https://')
     .replace(/\bsrc\s*=\s*["'](https?:\/\/[^"']+)["']/gi, (_match, url) => `src="${url}"`)
     .replace(/<img\b([^>]*)>/gi, (_match, attrs) => {
-      // 添加懒加载和优化属性
+      const cleanAttrs = attrs.replace(/\/\s*$/, "");
       const hasLoading = /\bloading\s*=/i.test(attrs);
       const hasDecoding = /\bdecoding\s*=/i.test(attrs);
+      const hasAlt = /\balt\s*=/i.test(attrs);
+      const hasTitle = /\btitle\s*=/i.test(attrs);
       const loadingAttr = hasLoading ? '' : ' loading="lazy"';
       const decodingAttr = hasDecoding ? '' : ' decoding="async"';
-      return `<img${attrs}${loadingAttr}${decodingAttr} style="max-width:100%;height:auto;" />`;
+      const altAttr = hasAlt ? '' : ' alt="题目或解析图片"';
+      const titleAttr = hasTitle ? '' : ' title="题目或解析图片"';
+      return `<img${cleanAttrs}${altAttr}${titleAttr}${loadingAttr}${decodingAttr} style="max-width:100%;height:auto;" />`;
     });
 }
 
@@ -129,20 +139,23 @@ export function getOptionDisplayHtml(option: Option) {
 export function answerToText(value?: AnswerValue) {
   if (value === undefined || value === null) return "";
   if (typeof value === "boolean") return value ? "正确" : "错误";
-  return Array.isArray(value) ? value.join("") : String(value);
+  return normalizeChoiceText(Array.isArray(value) ? value.join("") : String(value));
+}
+
+export function answerToKeys(value?: AnswerValue) {
+  const text = answerToText(value);
+  return /^[A-Z]+$/.test(text) ? text.split("") : [];
 }
 
 export function getCorrectText(question: Pick<Question, "type" | "answer">) {
-  if (question.type === "multi_choice") return (question.answer as string[]).join("");
-  if (question.type === "true_false") return (question.answer as boolean) ? "正确" : "错误";
-  return String(question.answer);
+  return answerToText(question.answer);
 }
 
 export function getAnswerContent(question: Pick<Question, "type" | "options">, value?: AnswerValue) {
   if (value === undefined || value === null || value === "") return "";
   if (question.type === "true_false") return answerToText(value);
 
-  const keys = Array.isArray(value) ? value : String(value).split("").filter(Boolean);
+  const keys = answerToKeys(value);
   const content = keys
     .map((key) => {
       const option = question.options?.find((item) => item.key === key);
@@ -155,9 +168,7 @@ export function getAnswerContent(question: Pick<Question, "type" | "options">, v
 }
 
 export function getCorrectAnswerContent(question: Pick<Question, "type" | "answer" | "options">) {
-  if (question.type === "multi_choice") return getAnswerContent(question, question.answer as string[]);
-  if (question.type === "true_false") return getAnswerContent(question, question.answer as boolean);
-  return getAnswerContent(question, String(question.answer));
+  return getAnswerContent(question, question.answer);
 }
 
 export function hasUsefulExplanation(explanation = "") {

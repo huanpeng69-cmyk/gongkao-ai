@@ -50,7 +50,7 @@ export default function Sidebar() {
         </Link>
         {!collapsed && <div>
           <div className="text-sm font-bold" style={{ color: "var(--ink)" }}>公考私教</div>
-          <div className="text-xs font-medium" style={{ color: "var(--steel)" }}>AI Study Desk</div>
+          <div className="text-xs font-medium" style={{ color: "var(--steel)" }}>真题 · 模考 · 错题复盘</div>
         </div>}
         <button
           onClick={() => setCollapsed((value) => !value)}
@@ -73,7 +73,7 @@ export default function Sidebar() {
       )}
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        {!collapsed && <div className="px-3 pb-2 text-xs font-bold" style={{ color: "var(--stone)" }}>学习工作台</div>}
+        {!collapsed && <div className="px-3 pb-2 text-xs font-bold" style={{ color: "var(--stone)" }}>功能入口</div>}
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (

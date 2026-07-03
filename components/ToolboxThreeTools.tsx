@@ -1984,72 +1984,164 @@ function makeSectionPreviewGeometry(preview: SectionPreview) {
   return new THREE.ShapeGeometry(new THREE.Shape(makeSectionPoints(sides, preview === "triangle" ? 0.95 : 1)));
 }
 
+const sectionPreviewLabels: Record<SectionPreview, string> = {
+  circle: "圆形截面",
+  ellipse: "椭圆截面",
+  hexagon: "六边形截面",
+  pentagon: "五边形截面",
+  rectangle: "矩形截面",
+  trapezoid: "梯形截面",
+  triangle: "三角形截面",
+};
+
+const sectionButtonsByGeometry: Record<CutGeometry, SectionPreview[]> = {
+  cone: ["circle", "ellipse", "triangle"],
+  cube: ["triangle", "rectangle", "pentagon", "hexagon"],
+  cuboid: ["triangle", "rectangle", "pentagon", "hexagon"],
+  cylinder: ["circle", "ellipse", "rectangle"],
+  frustum: ["circle", "ellipse", "trapezoid"],
+  sphere: ["circle"],
+};
+
+function makeSectionOutlinePoints(preview: SectionPreview) {
+  if (preview === "circle" || preview === "ellipse") {
+    return Array.from({ length: 72 }, (_, index) => {
+      const angle = (index / 72) * Math.PI * 2;
+      const x = Math.cos(angle) * 0.9 * (preview === "ellipse" ? 1.38 : 1);
+      const y = Math.sin(angle) * 0.9 * (preview === "ellipse" ? 0.62 : 1);
+      return new THREE.Vector2(x, y);
+    });
+  }
+  if (preview === "rectangle") {
+    return [
+      new THREE.Vector2(-1.1, -0.68),
+      new THREE.Vector2(1.1, -0.68),
+      new THREE.Vector2(1.1, 0.68),
+      new THREE.Vector2(-1.1, 0.68),
+    ];
+  }
+  if (preview === "trapezoid") {
+    return [
+      new THREE.Vector2(-1.2, -0.72),
+      new THREE.Vector2(1.2, -0.72),
+      new THREE.Vector2(0.72, 0.72),
+      new THREE.Vector2(-0.72, 0.72),
+    ];
+  }
+  const sides = preview === "triangle" ? 3 : preview === "pentagon" ? 5 : 6;
+  return makeSectionPoints(sides, preview === "triangle" ? 0.95 : 1);
+}
+
+function makeSectionOutlineGeometry(preview: SectionPreview) {
+  const points = makeSectionOutlinePoints(preview);
+  const closed = [...points, points[0]];
+  return new THREE.BufferGeometry().setFromPoints(closed.map((point) => new THREE.Vector3(point.x, point.y, 0.018)));
+}
+
+function SectionAnswerCard({ preview }: { preview: SectionPreview }) {
+  const points: Partial<Record<SectionPreview, string>> = {
+    hexagon: "75,32 149,32 192,105 149,180 75,180 30,105",
+    pentagon: "66,153 86,58 179,58 199,111 143,184 92,177",
+    rectangle: "43,58 178,58 178,166 43,166",
+    trapezoid: "47,168 174,168 146,54 75,54",
+    triangle: "110,34 187,172 35,172",
+  };
+
+  return (
+    <div className="three-cut-answer-card">
+      <svg viewBox="0 0 220 220" className="three-cut-answer-svg" aria-label={sectionPreviewLabels[preview]}>
+        {preview === "circle" ? (
+          <circle cx="110" cy="108" r="68" fill="#dbeafe" stroke="#3b82f6" strokeWidth="3" />
+        ) : preview === "ellipse" ? (
+          <path d="M68 35 C114 15 175 34 194 83 C215 137 171 190 115 197 C58 204 22 151 37 93 C42 72 51 51 68 35 Z" fill="#dbeafe" stroke="#3b82f6" strokeWidth="3" />
+        ) : (
+          <>
+            <polygon points={points[preview]} fill="#dbeafe" stroke="#3b82f6" strokeWidth="3" strokeLinejoin="round" />
+            {points[preview]?.split(" ").map((pair) => {
+              const [x, y] = pair.split(",");
+              return <circle key={pair} cx={x} cy={y} r="5" fill="#2563eb" />;
+            })}
+          </>
+        )}
+        {preview === "pentagon" && (
+          <>
+            <text x="115" y="63" fill="#64748b" fontSize="12" fontWeight="700">2.8</text>
+            <text x="39" y="118" fill="#64748b" fontSize="12" fontWeight="700">2.6</text>
+            <text x="166" y="135" fill="#64748b" fontSize="12" fontWeight="700">4.2</text>
+            <text x="54" y="163" fill="#64748b" fontSize="12" fontWeight="700">1.6</text>
+            <text x="106" y="194" fill="#64748b" fontSize="12" fontWeight="700">1.3</text>
+          </>
+        )}
+      </svg>
+      <div className="three-cut-answer-title">{sectionPreviewLabels[preview]}</div>
+    </div>
+  );
+}
+
 export function ThreeCutTool() {
-  const [geometryKind, setGeometryKind] = useState<CutGeometry>("cube");
-  const [operation, setOperation] = useState<"move" | "rotate" | "scale">("rotate");
+  const [geometryKind, setGeometryKind] = useState<CutGeometry>("cuboid");
   const [angleX, setAngleX] = useState(28);
   const [angleY, setAngleY] = useState(-18);
   const [angleZ, setAngleZ] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [planeSize, setPlaneSize] = useState(4.4);
-  const [solidOpacity, setSolidOpacity] = useState(56);
-  const [hollowMode, setHollowMode] = useState<"center" | "off" | "tunnel">("off");
-  const [hollowSize, setHollowSize] = useState(48);
-  const [cutEnabled, setCutEnabled] = useState(true);
-  const [showPlane, setShowPlane] = useState(true);
-  const [showAxes, setShowAxes] = useState(true);
-  const [keepNegative, setKeepNegative] = useState(false);
-  const [spin, setSpin] = useState(false);
-  const [geometryColor, setGeometryColor] = useState("#d7ecff");
-  const [planeColor, setPlaneColor] = useState("#e34a44");
-  const [sectionColor, setSectionColor] = useState("#f2b84b");
-  const [helperColor, setHelperColor] = useState("#1f2937");
-  const [directEdit, setDirectEdit] = useState(true);
   const [draggingPlane, setDraggingPlane] = useState(false);
   const planeDragRef = useRef<null | {
     angleX: number;
     angleY: number;
     offset: number;
-    planeSize: number;
     x: number;
     y: number;
   }>(null);
 
-  const normal = useMemo(() => makeCutNormal(angleX, angleY, angleZ, keepNegative), [angleX, angleY, angleZ, keepNegative]);
+  const normal = useMemo(() => makeCutNormal(angleX, angleY, angleZ), [angleX, angleY, angleZ]);
   const sectionInfo = useMemo(() => deriveSectionInfo(geometryKind, normal, offset), [geometryKind, normal, offset]);
-  const currentGeometry = cutGeometryOptions.find((item) => item.id === geometryKind) || cutGeometryOptions[0];
 
   const resetCut = () => {
     setAngleX(28);
     setAngleY(-18);
     setAngleZ(0);
     setOffset(0);
-    setPlaneSize(4.4);
-    setCutEnabled(true);
-    setShowPlane(true);
-    setKeepNegative(false);
   };
 
-  const setCutDirection = (direction: "front" | "horizontal" | "side" | "slant") => {
-    if (direction === "horizontal") {
+  const chooseGeometry = (kind: CutGeometry) => {
+    setGeometryKind(kind);
+    setOffset(kind === "cylinder" ? 0.15 : 0);
+    setAngleX(kind === "cylinder" ? 30 : 28);
+    setAngleY(kind === "cylinder" ? -12 : -18);
+    setAngleZ(0);
+  };
+
+  const setSectionPreset = (preview: SectionPreview) => {
+    if (preview === "circle") {
       setAngleX(0);
       setAngleY(0);
       setAngleZ(0);
-    }
-    if (direction === "front") {
-      setAngleX(90);
+      setOffset(0);
+    } else if (preview === "rectangle") {
+      setAngleX(geometryKind === "cylinder" ? 80 : 0);
       setAngleY(0);
       setAngleZ(0);
-    }
-    if (direction === "side") {
-      setAngleX(0);
+      setOffset(0);
+    } else if (preview === "triangle") {
+      setAngleX(34);
+      setAngleY(-24);
+      setAngleZ(0);
+      setOffset(1.25);
+    } else if (preview === "hexagon") {
+      setAngleX(45);
+      setAngleY(35);
+      setAngleZ(-15);
+      setOffset(0);
+    } else if (preview === "trapezoid") {
+      setAngleX(80);
       setAngleY(0);
-      setAngleZ(-90);
-    }
-    if (direction === "slant") {
+      setAngleZ(0);
+      setOffset(0);
+    } else {
       setAngleX(28);
       setAngleY(-18);
       setAngleZ(0);
+      setOffset(preview === "ellipse" ? 0.15 : 0);
     }
   };
 
@@ -2060,10 +2152,10 @@ export function ThreeCutTool() {
   };
 
   const startPlaneDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!directEdit || event.button !== 0) return;
+    if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    planeDragRef.current = { angleX, angleY, offset, planeSize, x: event.clientX, y: event.clientY };
+    planeDragRef.current = { angleX, angleY, offset, x: event.clientX, y: event.clientY };
     setDraggingPlane(true);
   };
 
@@ -2072,16 +2164,8 @@ export function ThreeCutTool() {
     if (!start) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (operation === "move") {
-      setOffset(clampNumber(start.offset - dy * 0.01, -1.55, 1.55));
-    }
-    if (operation === "rotate") {
-      setAngleX(clampNumber(start.angleX + dy * 0.35, -80, 80));
-      setAngleY(clampNumber(start.angleY + dx * 0.35, -80, 80));
-    }
-    if (operation === "scale") {
-      setPlaneSize(clampNumber(start.planeSize + (dx - dy) * 0.012, 2.4, 6.4));
-    }
+    setAngleX(clampNumber(start.angleX + dy * 0.35, -80, 80));
+    setAngleY(clampNumber(start.angleY + dx * 0.35, -80, 80));
   };
 
   const stopPlaneDrag = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2097,381 +2181,160 @@ export function ThreeCutTool() {
 
   const buildScene = useCallback<SceneBuilder>(
     ({ camera, controls, renderer, scene }) => {
-      scene.background = new THREE.Color("#f6f7f8");
-      renderer.setClearColor("#f6f7f8", 1);
-      renderer.localClippingEnabled = cutEnabled;
-      camera.position.set(5.2, 4.4, 6.2);
+      scene.background = new THREE.Color("#eef3f8");
+      renderer.setClearColor("#eef3f8", 1);
+      renderer.localClippingEnabled = false;
+      camera.position.set(4.5, 3.9, 5.4);
       controls.target.set(0, 0, 0);
       controls.enableDamping = true;
       controls.minDistance = 3.8;
-      controls.maxDistance = 12;
+      controls.maxDistance = 9;
 
       const root = new THREE.Group();
       scene.add(root);
 
-      if (showAxes) {
-        const grid = new THREE.GridHelper(8, 16, "#d8dde3", "#e8ebef");
-        const gridMaterial = grid.material as THREE.LineBasicMaterial;
-        gridMaterial.transparent = true;
-        gridMaterial.opacity = 0.55;
-        grid.position.y = -1.62;
-        root.add(grid);
-        root.add(new THREE.AxesHelper(2.35));
-      }
-
-      const cutPlane = new THREE.Plane(normal.clone(), offset);
       const geometry = makeCutGeometry(geometryKind);
       const solidMaterial = new THREE.MeshStandardMaterial({
-        clippingPlanes: cutEnabled ? [cutPlane] : [],
-        clipShadows: true,
-        color: geometryColor,
+        color: "#cfefff",
         metalness: 0.04,
-        opacity: solidOpacity / 100,
+        opacity: 0.38,
         roughness: 0.55,
         side: THREE.DoubleSide,
         transparent: true,
       });
       const mesh = new THREE.Mesh(geometry, solidMaterial);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       root.add(mesh);
 
       const edgeMaterial = new THREE.LineBasicMaterial({
-        clippingPlanes: cutEnabled ? [cutPlane] : [],
-        color: helperColor,
-        opacity: 0.52,
+        color: "#64748b",
+        opacity: 0.72,
         transparent: true,
       });
       root.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edgeMaterial));
 
-      if (hollowMode !== "off") {
-        const hollow = new THREE.Mesh(
-          makeCutGeometry(geometryKind),
-          new THREE.MeshBasicMaterial({
-            color: "#ffffff",
-            opacity: 0.18,
-            transparent: true,
-            wireframe: hollowMode === "tunnel",
-          }),
-        );
-        const hollowScale = Math.max(0.18, hollowSize / 100);
-        hollow.scale.set(hollowMode === "tunnel" ? hollowScale : hollowScale, hollowMode === "tunnel" ? 1.22 : hollowScale, hollowScale);
-        root.add(hollow);
-      }
-
       const planePosition = normal.clone().multiplyScalar(-offset);
       const planeQuaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+      const planeSize = geometryKind === "sphere" ? 3.1 : geometryKind === "cylinder" || geometryKind === "cone" || geometryKind === "frustum" ? 3.5 : 4.3;
 
-      if (showPlane) {
-        const planeMesh = new THREE.Mesh(
-          new THREE.PlaneGeometry(planeSize, planeSize),
-          new THREE.MeshBasicMaterial({
-            color: planeColor,
-            opacity: cutEnabled ? 0.16 : 0.08,
-            side: THREE.DoubleSide,
-            transparent: true,
-          }),
-        );
-        planeMesh.position.copy(planePosition);
-        planeMesh.quaternion.copy(planeQuaternion);
-        root.add(planeMesh);
-
-        const planeEdge = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.PlaneGeometry(planeSize, planeSize)),
-          new THREE.LineBasicMaterial({ color: planeColor, opacity: 0.72, transparent: true }),
-        );
-        planeEdge.position.copy(planePosition);
-        planeEdge.quaternion.copy(planeQuaternion);
-        root.add(planeEdge);
-      }
-
-      const previewGeometry = makeSectionPreviewGeometry(sectionInfo.preview);
-      const preview = new THREE.Mesh(
-        previewGeometry,
+      const planeMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(planeSize, planeSize),
         new THREE.MeshBasicMaterial({
-          color: sectionColor,
-          opacity: cutEnabled ? 0.62 : 0.22,
+          color: "#f59e5b",
+          depthWrite: false,
+          opacity: 0.5,
           side: THREE.DoubleSide,
           transparent: true,
         }),
       );
-      preview.position.copy(planePosition.add(normal.clone().multiplyScalar(0.014)));
-      preview.quaternion.copy(planeQuaternion);
-      root.add(preview);
-      root.add(
-        new THREE.LineSegments(
-          new THREE.EdgesGeometry(previewGeometry),
-          new THREE.LineBasicMaterial({ color: sectionColor, opacity: 0.96, transparent: true }),
-        ),
-      );
-      const lastChild = root.children[root.children.length - 1];
-      lastChild.position.copy(preview.position);
-      lastChild.quaternion.copy(preview.quaternion);
+      planeMesh.position.copy(planePosition);
+      planeMesh.quaternion.copy(planeQuaternion);
+      root.add(planeMesh);
 
-      return {
-        animate: () => {
-          if (spin) root.rotation.y += 0.006;
-        },
-      };
+      const outline = new THREE.Line(
+        makeSectionOutlineGeometry(sectionInfo.preview),
+        new THREE.LineBasicMaterial({ color: "#fb923c", opacity: 0.95, transparent: true }),
+      );
+      outline.position.copy(planePosition.clone().add(normal.clone().multiplyScalar(0.03)));
+      outline.quaternion.copy(planeQuaternion);
+      root.add(outline);
+
+      if (!["circle", "ellipse"].includes(sectionInfo.preview)) {
+        const points = makeSectionOutlinePoints(sectionInfo.preview);
+        const handleGroup = new THREE.Group();
+        points.forEach((point) => {
+          const handle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.07, 18, 18),
+            new THREE.MeshBasicMaterial({ color: "#fffdf4" }),
+          );
+          handle.position.set(point.x, point.y, 0.04);
+          handleGroup.add(handle);
+        });
+        handleGroup.position.copy(outline.position);
+        handleGroup.quaternion.copy(planeQuaternion);
+        root.add(handleGroup);
+      }
+
+      return {};
     },
-    [
-      angleX,
-      angleY,
-      angleZ,
-      cutEnabled,
-      geometryColor,
-      geometryKind,
-      helperColor,
-      hollowMode,
-      hollowSize,
-      normal,
-      offset,
-      planeColor,
-      planeSize,
-      sectionColor,
-      sectionInfo.preview,
-      showAxes,
-      showPlane,
-      solidOpacity,
-      spin,
-    ],
+    [geometryKind, normal, offset, sectionInfo.preview],
   );
 
-  const sceneKey = [
-    "cut",
-    geometryKind,
-    angleX,
-    angleY,
-    angleZ,
-    offset,
-    planeSize,
-    solidOpacity,
-    hollowMode,
-    hollowSize,
-    cutEnabled,
-    showPlane,
-    showAxes,
-    keepNegative,
-    spin,
-    geometryColor,
-    planeColor,
-    sectionColor,
-    helperColor,
-  ].join("-");
+  const sceneKey = ["cut", geometryKind, angleX, angleY, angleZ, offset, sectionInfo.preview].join("-");
 
   return (
-    <section className="three-tool three-cut-tool soft-card overflow-hidden p-0">
-      <div className="three-cut-shell" style={{ width: "100%", height: "min(820px, calc(100vh - 96px))", minHeight: 700, display: "flex", overflow: "hidden", background: "#f1f2f4", fontFamily: "Microsoft YaHei, PingFang SC, sans-serif" }}>
-        <div className="three-cut-stage-wrap" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden" }}>
-          <ThreeStage buildScene={buildScene} sceneKey={sceneKey} />
-          {directEdit && (
-            <div
-              className="three-cut-direct-layer"
-              onPointerDown={startPlaneDrag}
-              onPointerMove={movePlaneDrag}
-              onPointerUp={stopPlaneDrag}
-              onPointerCancel={stopPlaneDrag}
-              style={{
-                alignItems: "center",
-                cursor: operation === "move" ? "ns-resize" : operation === "rotate" ? "grab" : "nesw-resize",
-                display: "flex",
-                inset: 0,
-                justifyContent: "center",
-                position: "absolute",
-                zIndex: 8,
-              }}
-            >
-              <div
-                className="three-cut-direct-hint"
-                style={{
-                  background: draggingPlane ? "rgba(177,30,26,.92)" : "rgba(255,255,255,.88)",
-                  border: draggingPlane ? "1px solid #b11e1a" : "1px solid rgba(177,30,26,.28)",
-                  borderRadius: 999,
-                  boxShadow: "0 6px 18px rgba(0,0,0,.12)",
-                  color: draggingPlane ? "#fff" : "#b11e1a",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  padding: "8px 14px",
-                  pointerEvents: "none",
-                  transform: "translateY(-72px)",
-                }}
-              >
-                {operation === "move" ? "拖动移动切面" : operation === "rotate" ? "拖动改变切向" : "拖动缩放切面"}
-              </div>
-            </div>
-          )}
-
-          <div className="three-cut-floating-actions" style={{ position: "absolute", left: 18, top: 18, display: "flex", gap: 8, zIndex: 10 }}>
-            <button onClick={() => setDirectEdit((value) => !value)} style={{ ...cutModeButtonStyle, background: directEdit ? "#b11e1a" : "#fff", color: directEdit ? "#fff" : "#374151" }}>
-              {directEdit ? "拖动切面" : "观察模型"}
-            </button>
-            <button onClick={() => setSpin((value) => !value)} style={{ ...cutModeButtonStyle, background: spin ? "#b11e1a" : "#fff", color: spin ? "#fff" : "#374151" }}>
-              {spin ? "停止旋转" : "自动旋转"}
-            </button>
-            <button onClick={() => setShowAxes((value) => !value)} style={{ ...cutModeButtonStyle, background: showAxes ? "#b11e1a" : "#fff", color: showAxes ? "#fff" : "#374151" }}>
-              {showAxes ? "隐藏坐标" : "显示坐标"}
-            </button>
+    <section className="three-tool three-cut-tool overflow-hidden">
+      <div className="three-cut-shell">
+        <div className="three-cut-titlebar">
+          <div>
+            <div className="three-cut-title">立体截面-{cutGeometryOptions.find((item) => item.id === geometryKind)?.title}</div>
+            <div className="three-cut-subtitle">空间想象专项训练</div>
           </div>
-
-          <div className="three-cut-info" style={{ position: "absolute", bottom: 18, left: 18, maxWidth: 560, color: "#333", fontSize: 13, background: "rgba(255,255,255,.94)", backdropFilter: "blur(10px)", border: "1px solid rgba(0,0,0,.08)", padding: "10px 14px", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,.08)", lineHeight: 1.7, zIndex: 9 }}>
-            <strong style={{ color: "#b11e1a" }}>{sectionInfo.title}</strong>
-            <span style={{ marginLeft: 8 }}>{sectionInfo.desc}</span>
+          <div className="three-cut-window-controls">
+            <span>•••</span>
+            <span />
+            <span>−</span>
+            <span>◎</span>
           </div>
         </div>
 
-        <aside className="three-cut-panel" style={{ width: 300, minWidth: 300, height: "100%", background: "linear-gradient(180deg,#fff,#f8f8f8)", boxShadow: "-2px 0 16px rgba(0,0,0,.08)", overflowY: "auto", padding: "14px 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px 11px", borderBottom: "1px solid #e0e0e0", marginBottom: 14 }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: "#263238" }}>几何体切割控制面板</span>
+        <div className="three-cut-stage-wrap">
+          <ThreeStage buildScene={buildScene} sceneKey={sceneKey} />
+          <div
+            className="three-cut-direct-layer"
+            onPointerDown={startPlaneDrag}
+            onPointerMove={movePlaneDrag}
+            onPointerUp={stopPlaneDrag}
+            onPointerCancel={stopPlaneDrag}
+          >
+            <div className={draggingPlane ? "three-cut-direct-hint is-active" : "three-cut-direct-hint"}>
+              单指旋转截面
+            </div>
           </div>
+        </div>
 
-          <CutPanelSection title="选择几何体">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-              {cutGeometryOptions.map((item) => (
+        <div className="three-cut-control-card">
+          <div className="three-cut-control-head">
+            <strong>{sectionInfo.title}</strong>
+            <span>单指旋转截面 · 按钮/双指旋转视角</span>
+          </div>
+          <label className="three-cut-slider">
+            <span>截面位置</span>
+            <input type="range" min="-1.35" max="1.35" step="0.05" value={offset} onChange={(event) => setOffset(Number(event.target.value))} />
+          </label>
+        </div>
+
+        <div className="three-cut-practice-card">
+          <SectionAnswerCard preview={sectionInfo.preview} />
+          <div className="three-cut-practice-side">
+            <div className="three-cut-pad" aria-label="截面方向微调">
+              <button onClick={() => nudgeCutDirection("x", -8)}>▲</button>
+              <button onClick={() => nudgeCutDirection("y", -8)}>◀</button>
+              <button onClick={resetCut}>↻</button>
+              <button onClick={() => nudgeCutDirection("y", 8)}>▶</button>
+              <button onClick={() => nudgeCutDirection("x", 8)}>▼</button>
+            </div>
+            <div className="three-cut-quick-title">一键切出图案</div>
+            <div className="three-cut-preset-grid">
+              {sectionButtonsByGeometry[geometryKind].map((preview) => (
                 <button
-                  key={item.id}
-                  onClick={() => setGeometryKind(item.id)}
-                  style={{
-                    alignItems: "center",
-                    background: geometryKind === item.id ? "#fff4f3" : "#fff",
-                    border: geometryKind === item.id ? "2px solid #b11e1a" : "1px solid #e1e5ea",
-                    borderRadius: 8,
-                    color: geometryKind === item.id ? "#b11e1a" : "#374151",
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    fontWeight: 800,
-                    minHeight: 58,
-                    padding: "7px 4px",
-                  }}
+                  key={preview}
+                  onClick={() => setSectionPreset(preview)}
+                  className={sectionInfo.preview === preview ? "is-active" : undefined}
                 >
-                  <span style={{ fontSize: 18, lineHeight: 1.1 }}>{item.short}</span>
-                  <span style={{ fontSize: 11, marginTop: 4 }}>{item.title}</span>
+                  {sectionPreviewLabels[preview].replace("截面", "")}
                 </button>
               ))}
             </div>
-            <p style={{ margin: "8px 2px 0", color: "#6b7280", fontSize: 11, lineHeight: 1.55 }}>{currentGeometry.desc}</p>
-          </CutPanelSection>
+          </div>
+        </div>
 
-          <CutPanelSection title="几何体操作">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-              {(["move", "rotate", "scale"] as const).map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setOperation(item)}
-                  style={{ ...cutModeButtonStyle, background: operation === item ? "#b11e1a" : "#f8f9fa", color: operation === item ? "#fff" : "#495057" }}
-                >
-                  {item === "move" ? "移动" : item === "rotate" ? "旋转" : "缩放"}
-                </button>
-              ))}
-            </div>
-            <label style={cutLabelStyle}>
-              透明度 {solidOpacity}%
-              <input type="range" min="20" max="90" value={solidOpacity} onChange={(event) => setSolidOpacity(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-          </CutPanelSection>
-
-          <CutPanelSection title="挖空操作">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-              {(["off", "center", "tunnel"] as const).map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setHollowMode(item)}
-                  style={{ ...cutModeButtonStyle, background: hollowMode === item ? "#b11e1a" : "#f8f9fa", color: hollowMode === item ? "#fff" : "#495057" }}
-                >
-                  {item === "off" ? "关闭" : item === "center" ? "中心" : "贯穿"}
-                </button>
-              ))}
-            </div>
-            <label style={cutLabelStyle}>
-              挖空尺寸 {hollowSize}%
-              <input type="range" min="18" max="82" value={hollowSize} onChange={(event) => setHollowSize(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-          </CutPanelSection>
-
-          <CutPanelSection title="剪切操作">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 6 }}>
-              <button onClick={() => setCutEnabled((value) => !value)} style={{ ...cutModeButtonStyle, background: cutEnabled ? "#b11e1a" : "#f8f9fa", color: cutEnabled ? "#fff" : "#495057" }}>
-                {cutEnabled ? "关闭剪切" : "开启剪切"}
-              </button>
-              <button onClick={() => setShowPlane((value) => !value)} style={{ ...cutModeButtonStyle, background: showPlane ? "#b11e1a" : "#f8f9fa", color: showPlane ? "#fff" : "#495057" }}>
-                {showPlane ? "隐藏切面" : "显示切面"}
-              </button>
-              <button onClick={() => setKeepNegative(false)} style={{ ...cutModeButtonStyle, background: !keepNegative ? "#b11e1a" : "#f8f9fa", color: !keepNegative ? "#fff" : "#495057" }}>
-                保留上侧
-              </button>
-              <button onClick={() => setKeepNegative(true)} style={{ ...cutModeButtonStyle, background: keepNegative ? "#b11e1a" : "#f8f9fa", color: keepNegative ? "#fff" : "#495057" }}>
-                保留下侧
-              </button>
-            </div>
-          </CutPanelSection>
-
-          <CutPanelSection title="切向控制">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 6, marginBottom: 8 }}>
-              <button onClick={() => setCutDirection("horizontal")} style={{ ...cutModeButtonStyle, background: "#f8f9fa", color: "#495057" }}>
-                水平平切
-              </button>
-              <button onClick={() => setCutDirection("side")} style={{ ...cutModeButtonStyle, background: "#f8f9fa", color: "#495057" }}>
-                左右竖切
-              </button>
-              <button onClick={() => setCutDirection("front")} style={{ ...cutModeButtonStyle, background: "#f8f9fa", color: "#495057" }}>
-                前后竖切
-              </button>
-              <button onClick={() => setCutDirection("slant")} style={{ ...cutModeButtonStyle, background: "#b11e1a", color: "#fff" }}>
-                常用斜切
-              </button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-              <button onClick={() => nudgeCutDirection("x", -10)} style={cutModeButtonStyle}>X-</button>
-              <button onClick={() => nudgeCutDirection("y", -10)} style={cutModeButtonStyle}>Y-</button>
-              <button onClick={() => nudgeCutDirection("z", -10)} style={cutModeButtonStyle}>Z-</button>
-              <button onClick={() => nudgeCutDirection("x", 10)} style={cutModeButtonStyle}>X+</button>
-              <button onClick={() => nudgeCutDirection("y", 10)} style={cutModeButtonStyle}>Y+</button>
-              <button onClick={() => nudgeCutDirection("z", 10)} style={cutModeButtonStyle}>Z+</button>
-            </div>
-          </CutPanelSection>
-
-          <CutPanelSection title="切面操作">
-            <label style={cutLabelStyle}>
-              移动 {offset.toFixed(1)}
-              <input type="range" min="-1.55" max="1.55" step="0.05" value={offset} onChange={(event) => setOffset(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-            <label style={cutLabelStyle}>
-              X轴旋转 {angleX}°
-              <input type="range" min="-80" max="80" value={angleX} onChange={(event) => setAngleX(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-            <label style={cutLabelStyle}>
-              Y轴旋转 {angleY}°
-              <input type="range" min="-80" max="80" value={angleY} onChange={(event) => setAngleY(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-            <label style={cutLabelStyle}>
-              Z轴旋转 {angleZ}°
-              <input type="range" min="-80" max="80" value={angleZ} onChange={(event) => setAngleZ(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-            <label style={cutLabelStyle}>
-              切面大小 {planeSize.toFixed(1)}
-              <input type="range" min="2.4" max="6.4" step="0.1" value={planeSize} onChange={(event) => setPlaneSize(Number(event.target.value))} style={{ width: "100%", accentColor: "#b11e1a" }} />
-            </label>
-            <button onClick={resetCut} style={{ ...cutModeButtonStyle, width: "100%", background: "#b11e1a", color: "#fff" }}>
-              复位切面
+        <div className="three-cut-geometry-row">
+          {cutGeometryOptions.map((item) => (
+            <button key={item.id} onClick={() => chooseGeometry(item.id)} className={geometryKind === item.id ? "is-active" : undefined}>
+              {item.title}
             </button>
-          </CutPanelSection>
-
-          <CutPanelSection title="颜色配置">
-            <div style={{ display: "grid", gap: 8 }}>
-              {[
-                ["几何体", geometryColor, setGeometryColor],
-                ["切面", planeColor, setPlaneColor],
-                ["截面", sectionColor, setSectionColor],
-                ["辅助线", helperColor, setHelperColor],
-              ].map(([label, value, setter]) => (
-                <label key={label as string} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#495057" }}>
-                  {label as string}
-                  <input type="color" value={value as string} onChange={(event) => (setter as React.Dispatch<React.SetStateAction<string>>)(event.target.value)} />
-                </label>
-              ))}
-            </div>
-          </CutPanelSection>
-        </aside>
+          ))}
+        </div>
       </div>
     </section>
   );

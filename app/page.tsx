@@ -104,7 +104,7 @@ export default function Dashboard() {
               <div className="mobile-brand-mark">▰</div>
               <div>
                 <div className="mobile-brand-title">公考私教</div>
-                <div className="mobile-brand-subtitle">AI Study Desk</div>
+                <div className="mobile-brand-subtitle">真题 · 模考 · 错题复盘</div>
               </div>
             </div>
             <Link href="/settings" className="mobile-bell" aria-label="系统设置">○</Link>
@@ -117,7 +117,7 @@ export default function Dashboard() {
               </h1>
               <p className="text-sm mb-7 max-w-[680px]" style={{ color: "var(--slate)" }}>
                 {user.totalQuestions === 0
-                  ? "欢迎使用公务员智学。先从真题题库开始，系统会记录错题、安排复习，并用 AI 帮你讲透原因。"
+                  ? "欢迎使用公考私教。先从真题题库开始，系统会记录错题、安排复习，并用 AI 帮你讲透原因。"
                   : `你已经累计刷题 ${user.totalQuestions} 道，正确率 ${accuracy}%。继续保持！`}
               </p>
               <div className="mobile-ai-cube" aria-hidden="true">
@@ -247,7 +247,7 @@ export default function Dashboard() {
           <QuickLink href="/quiz" icon="✓" title="真题题库" desc="材料题组 + AI 讲解" color="var(--brand-teal)" />
           <QuickLink href="/review" icon="↻" title="复习计划" desc={dueToday > 0 ? `${dueToday} 题待复习` : "暂无待复习"} color="var(--link-blue)" />
           <QuickLink href="/mock" icon="90" title="真题模考" desc="整卷计时训练" color="var(--brand-orange)" />
-          <QuickLink href="/toolbox" icon="▣" title="百宝箱" desc="公式速算 + 图推工具" color="var(--brand-navy)" />
+          <QuickLink href="/toolbox" icon="▣" title="百宝箱" desc="速算资料 + 图推工具" color="var(--brand-navy)" />
           <QuickLink href="/stats" icon="%" title="数据统计" desc="正确率与薄弱点" color="var(--brand-green)" />
         </div>
       </div>

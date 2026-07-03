@@ -56,12 +56,11 @@ async function loadImageWithRetry(src: string, retries = RETRY_COUNT): Promise<s
  */
 export function enhanceImagesInHtml(html: string): string {
   return html.replace(/<img\b([^>]*)>/gi, (match, attrs) => {
-    // 如果已有loading属性，不重复添加
-    if (/\bloading\s*=/i.test(attrs)) {
-      return match;
-    }
-    // 添加懒加载和错误处理
-    return `<img${attrs} loading="lazy" decoding="async" onerror="this.style.display='none';" />`;
+    const cleanAttrs = attrs.replace(/\/\s*$/, "");
+    const altAttr = /\balt\s*=/i.test(attrs) ? "" : ' alt="题目或解析图片"';
+    const titleAttr = /\btitle\s*=/i.test(attrs) ? "" : ' title="题目或解析图片"';
+    if (/\bloading\s*=/i.test(attrs)) return `<img${cleanAttrs}${altAttr}${titleAttr} />`;
+    return `<img${cleanAttrs}${altAttr}${titleAttr} loading="lazy" decoding="async" onerror="this.style.display='none';" />`;
   });
 }
 

@@ -21,6 +21,7 @@ import { loadQuestionBank } from "@/lib/question-bank-client";
 import { requestAi } from "@/lib/client-ai";
 import { requestImage } from "@/lib/client-image";
 import {
+  answerToKeys,
   answerToText,
   buildQuestionPromptText,
   getAnswerContent,
@@ -159,10 +160,9 @@ function getPracticeItemQuestionIds(item?: PracticeItem) {
 
 function isCorrectAnswer(question: PracticeQuestion, value?: AnswerValue) {
   if (value === undefined) return false;
+  if (question.type === "essay") return false;
   if (question.type === "multi_choice") {
-    const expected = question.answer as string[];
-    const selected = String(value).split("").sort();
-    return expected.length === selected.length && expected.every((key) => selected.includes(key));
+    return answerToText(question.answer) === answerToText(value);
   }
   if (question.type === "true_false") {
     return value === question.answer;
@@ -907,12 +907,15 @@ function QuestionBlock({
   const correctAnswerText = getCorrectText(question);
   const correctAnswerContent = getCorrectAnswerContent(question);
   const explanation = getDisplayExplanation(question);
+  const isFenbiSource = question.source === "fenbi" || /粉笔|fenbi/i.test(`${question.source || ""} ${question.sourceTitle || ""}`);
+  const isEssay = question.type === "essay";
+  const showAnswerPanel = submitted || isEssay;
 
   return (
     <article id={`q-${question.id}`} className="pb-6 mb-6" style={{ borderBottom: "1px solid var(--hairline-soft)" }}>
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {indexLabel && <span className="text-base font-semibold mr-1" style={{ color: "var(--ink)" }}>{indexLabel}</span>}
-        <Tag label={question.type === "multi_choice" ? "多选题" : question.type === "true_false" ? "判断题" : "单选题"} bg="var(--tint-sky)" color="var(--link-blue)" />
+        <Tag label={question.type === "essay" ? "申论题" : question.type === "multi_choice" ? "多选题" : question.type === "true_false" ? "判断题" : "单选题"} bg="var(--tint-sky)" color="var(--link-blue)" />
         <Tag label={question.module} bg="var(--tint-lavender)" color="var(--brand-navy)" />
         <Tag label={question.subModule} bg="var(--tint-peach)" color="var(--brand-orange)" />
       </div>
@@ -927,60 +930,80 @@ function QuestionBlock({
 
       <div className="text-base leading-relaxed mb-5 whitespace-pre-line" style={{ color: "var(--ink)" }}>{questionText}</div>
 
-      <AnswerOptions
-        question={question}
-        answer={answer}
-        submitted={submitted}
-        onSelectAnswer={onSelectAnswer}
-        onToggleMulti={onToggleMulti}
-      />
+      {!isEssay && (
+        <AnswerOptions
+          question={question}
+          answer={answer}
+          submitted={submitted}
+          onSelectAnswer={onSelectAnswer}
+          onToggleMulti={onToggleMulti}
+        />
+      )}
 
-      <div className="flex flex-wrap items-center gap-3 mt-4">
-        {!submitted ? (
-          <button
-            onClick={onSubmit}
-            disabled={answer === undefined || answer === ""}
-            className="px-4 py-2 text-sm font-medium rounded-md text-white disabled:opacity-50"
-            style={{ background: "var(--primary)" }}
-          >
-            提交答案
-          </button>
-        ) : (
-          <>
-            <span className="text-sm font-semibold" style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>
-              {correct ? "回答正确" : `答错了：你的答案 ${userAnswerText}，正确答案 ${correctAnswerText}`}
-            </span>
-          </>
-        )}
-      </div>
+      {!isEssay && (
+        <div className="flex flex-wrap items-center gap-3 mt-4">
+          {!submitted ? (
+            <button
+              onClick={onSubmit}
+              disabled={answer === undefined || answer === ""}
+              className="px-4 py-2 text-sm font-medium rounded-md text-white disabled:opacity-50"
+              style={{ background: "var(--primary)" }}
+            >
+              提交答案
+            </button>
+          ) : (
+            <>
+              <span className="text-sm font-semibold" style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>
+                {correct ? "回答正确" : `答错了：你的答案 ${userAnswerText}，正确答案 ${correctAnswerText}`}
+              </span>
+            </>
+          )}
+        </div>
+      )}
 
-      {submitted && (
+      {showAnswerPanel && (
         <div className="mt-4 rounded-lg p-4" style={{ background: "var(--surface)" }}>
-          <div className="grid gap-2 mb-4">
-            <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
-              <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>你的答案</span>
-              <span style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>{userAnswerText}</span>
-              {userAnswerContent && userAnswerContent !== userAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{userAnswerContent}</span>}
+          {!isEssay && (
+            <div className="grid gap-2 mb-4">
+              <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
+                <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>你的答案</span>
+                <span style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>{userAnswerText}</span>
+                {userAnswerContent && userAnswerContent !== userAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{userAnswerContent}</span>}
+              </div>
+              <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
+                <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>正确答案</span>
+                <span style={{ color: "var(--brand-green)" }}>{correctAnswerText}</span>
+                {correctAnswerContent && correctAnswerContent !== correctAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{correctAnswerContent}</span>}
+              </div>
             </div>
-            <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
-              <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>正确答案</span>
-              <span style={{ color: "var(--brand-green)" }}>{correctAnswerText}</span>
-              {correctAnswerContent && correctAnswerContent !== correctAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{correctAnswerContent}</span>}
-            </div>
-          </div>
+          )}
+          {explanation && (
+            <section className="fenbi-explanation">
+              <div className="fenbi-explanation-head">
+                <span className="fenbi-explanation-brand">
+                  <span className="fenbi-explanation-icon">粉</span>
+                  {isEssay ? "申论 参考答案与解析" : isFenbiSource ? "粉笔 解析" : "题库 解析"}
+                </span>
+                {!isEssay && <span className="fenbi-answer-pill">
+                  答案 <strong>{correctAnswerText}</strong>
+                </span>}
+              </div>
+              <div className="fenbi-explanation-body whitespace-pre-wrap">{explanation}</div>
+            </section>
+          )}
           <div className="flex flex-wrap gap-1.5 mt-3">
             {question.knowledgePoints?.map((point) => (
               <span key={point} className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: "var(--tint-lavender)", color: "var(--brand-navy)" }}>{point}</span>
             ))}
           </div>
-          <button
+          {!isEssay && <button
             onClick={onGenerateComic}
             disabled={comicLoading}
             className="ghost-button mt-4 px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-50"
             style={{ color: "var(--primary)" }}
           >
             {comicLoading ? "漫画生成中..." : "生成漫画讲解"}
-          </button>
+          </button>}
         </div>
       )}
 
@@ -1087,7 +1110,7 @@ function AnswerOptions({
           ? String(answer || "").includes(option.key)
           : answer === option.key;
         const correct = question.type === "multi_choice"
-          ? submitted && (question.answer as string[]).includes(option.key)
+          ? submitted && answerToKeys(question.answer).includes(option.key)
           : submitted && option.key === question.answer;
         const wrong = submitted && selected && !correct;
 

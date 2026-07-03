@@ -36,7 +36,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (!isLoginPage && !ready) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm" style={{ color: "var(--steel)" }}>
-        正在进入学习桌...
+        正在进入公考私教...
       </div>
     );
   }

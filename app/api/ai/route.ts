@@ -60,7 +60,7 @@ const GONGKAO_MASTER_PROMPT = `你是一位资深公考笔试私教，精通行�
 6. 资料分析：先读时间、主体、单位、指标；公式包括增长率=增长量/基期量，比重=部分/整体，间隔增长率=r1+r2+r1*r2；速算用截位直除、特征数字、错位加减，先看选项差距。
 7. 申论：点线面整体化。审身份、范围、任务、要求；找五要素：含义/问题/原因/影响/对策；利用转折、递进、并列、因果、条件、标点和高频词找点。
 8. 公基：马哲、公文、中特、经济、管理要先给框架再落细节。
-输出风格：像"公考智学"学习卡片。先给一段120-220字的深度解析总述，语气像老师当面讲清楚；再提炼3-6条"要点归纳"；最后给"记忆口诀"和"经典例题/类比"。不要空泛鼓励，不要堆概念。
+输出风格：像"公考私教"学习卡片。先给一段120-220字的深度解析总述，语气像老师当面讲清楚；再提炼3-6条"要点归纳"；最后给"记忆口诀"和"经典例题/类比"。不要空泛鼓励，不要堆概念。
 格式纪律：严格返回JSON；所有可展示字段都必须是字符串或字符串数组，数组项绝不能是对象；没有内容就返回空字符串或空数组。`;
 
 function withMasterPrompt(task: string) {
@@ -169,6 +169,39 @@ ${visualQuestion ? `图形题硬性规则：
   "example": "同类题识别例子或类比；没有则空字符串",
   "suggestion": "针对性复习建议",
   "bihangTip": "如果适合秒杀技巧，给出技巧名称和口诀"
+}`);
+}
+
+function buildExplainPrompt(input: {
+  question: string;
+  correctAnswer?: string;
+  explanation?: string;
+  context?: string;
+  module?: string;
+}) {
+  return withMasterPrompt(`请围绕正确答案做“正解讲解 + 考点迁移”，重点帮助用户理解这道题为什么这样选、同类题怎么识别。
+
+题目：${input.question}
+正确答案：${input.correctAnswer || "未知"}
+模块：${input.module || "未分类"}
+原始解析：${input.explanation || "无"}
+补充材料：${input.context || "无"}
+
+输出要求：
+1. analysis只写一段总述：先定位题型/考点，再讲正确思路和关键判断点
+2. keyPoints必须是3-6个短字符串，数组项必须是字符串
+3. method写成可迁移的短步骤，mnemonic写成可背口诀，example给一个同类题识别例子
+4. 禁止返回对象、禁止出现[object Object]
+
+严格返回 JSON：
+{
+  "title": "10字以内标题",
+  "analysis": "120-220字总述，说明为什么正确答案成立、常见干扰项错在哪里",
+  "keyPoints": ["3-6个必须记住的点，数组项必须是字符串"],
+  "method": "可迁移到同类题的方法步骤，写成简短框架",
+  "mnemonic": "记忆口诀（如适合）；不适合则留空",
+  "example": "1个同类题识别例子或简短类比",
+  "answerSummary": "一句话总结正确答案和判断依据"
 }`);
 }
 
@@ -353,6 +386,7 @@ function normalizeMode(mode: unknown) {
   const value = String(mode || "").trim();
   if (value === "home_tutor") return "tutor";
   if (value === "review_knowledge") return "review";
+  if (value === "explain_correct") return "explain";
   return value;
 }
 
@@ -694,6 +728,48 @@ export async function POST(request: Request) {
         isCorrect: userAnswer === correctAnswer,
         source: provider,
       });
+    }
+
+    if (requestMode === "explain") {
+      if (!question || !correctAnswer) {
+        return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      }
+
+      const promptText = buildExplainPrompt({
+        question,
+        correctAnswer,
+        explanation,
+        context,
+        module,
+      });
+
+      let rawText = "";
+      try {
+        if (provider === "anthropic") {
+          rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
+        } else {
+          rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
+        }
+      } catch (error) {
+        if (imageInputs.length > 0 && isImageInputUnsupportedError(error)) {
+          const textOnlyPrompt = buildExplainPrompt({
+            question,
+            correctAnswer,
+            explanation,
+            context,
+            module,
+          });
+          if (provider === "anthropic") {
+            rawText = await callAnthropic(textOnlyPrompt, [], effectiveConfig);
+          } else {
+            rawText = await callOpenAICompatible(textOnlyPrompt, [], effectiveConfig);
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      return NextResponse.json({ ...normalizeRawAiText(rawText), source: provider });
     }
 
     if (requestMode === "fenbi") {

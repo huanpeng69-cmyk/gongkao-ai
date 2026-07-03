@@ -35,6 +35,7 @@ function getDefaultData(): AppData {
         "数量关系": { correct: 0, total: 0, level: "中等" },
         "常识判断": { correct: 0, total: 0, level: "中等" },
         "公共基础知识": { correct: 0, total: 0, level: "中等" },
+        "申论": { correct: 0, total: 0, level: "中等" },
       },
     },
     errors: [],

@@ -11,10 +11,9 @@ import {
 } from "@/lib/toolbox-content";
 
 type ToolId =
-  | "formula"
   | "speed"
-  | "abxr"
   | "table"
+  | "focus"
   | "fractions"
   | "calculator"
   | "timer"
@@ -42,10 +41,9 @@ type DrillProblem = {
 type Block = { x: number; y: number; z: number };
 
 const tools: ToolMeta[] = [
-  { id: "formula", category: "data", title: "公式大全", desc: "公式速查 + 默写判定", icon: "📘" },
   { id: "speed", category: "data", title: "速算练习", desc: "闭门修炼、夺魁限时、自定义算式", icon: "⚡" },
-  { id: "abxr", category: "data", title: "ABXR专项", desc: "基期比重、平均数、倍数同形速算", icon: "📐" },
   { id: "table", category: "data", title: "速算表格", desc: "加减乘除表格化批量练习", icon: "📊" },
+  { id: "focus", category: "data", title: "资料主体", desc: "可选卡片量的主体词专注配对训练", icon: "▦" },
   { id: "fractions", category: "data", title: "分数记忆", desc: "百化分、平方数、单位换算卡片", icon: "🧠" },
   { id: "calculator", category: "data", title: "计算器", desc: "百分比、增长率、平均数、比重", icon: "🧮" },
   { id: "timer", category: "data", title: "计时器", desc: "考试模拟、倒计时、秒表计次", icon: "⏱" },
@@ -53,15 +51,15 @@ const tools: ToolMeta[] = [
   { id: "blocks", category: "graphics", title: "立体拼合", desc: "积木增删、合并、移动与投影视图", icon: "🧩" },
   { id: "cut", category: "graphics", title: "截面图", desc: "正方体切割面形状判断", icon: "✂" },
   { id: "views", category: "graphics", title: "三视图", desc: "主视、俯视、左视投影训练", icon: "◫" },
-  { id: "cards", category: "cards", title: "行测记忆卡片", desc: "资料分类、翻转背诵、掌握度复习、批量导入", icon: "▣" },
+  { id: "cards", category: "cards", title: "成语速记卡片", desc: "成语释义、近义辨析、翻转背诵", icon: "▣" },
 ];
 
 const toolById = Object.fromEntries(tools.map((tool) => [tool.id, tool])) as Record<ToolId, ToolMeta>;
 
-const cardStoreKey = "gongkao-toolbox-memory-cards";
-const progressStoreKey = "gongkao-toolbox-memory-progress";
-const memoryClearVersionKey = "gongkao-toolbox-memory-clear-version";
-const memoryClearVersion = "2026-06-19-memory-card-clean-v1";
+const cardStoreKey = "gongkao-toolbox-idiom-cards";
+const progressStoreKey = "gongkao-toolbox-idiom-progress";
+const memoryClearVersionKey = "gongkao-toolbox-idiom-clear-version";
+const memoryClearVersion = "2026-07-03-idiom-card-v2";
 
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -155,6 +153,149 @@ function makeTableProblems(type: string) {
   });
 }
 
+const focusTerms = [
+  "高技术制造业",
+  "限额以上批发",
+  "上半年进出口",
+  "科学技术支出",
+  "邮电业务总量",
+  "早稻播种面积",
+  "秋粮播种面积",
+  "建筑业增加值",
+  "软件业务收入",
+  "生猪出栏产量",
+  "集成电路进口",
+  "粮食播种面积",
+  "炼焦烟煤产量",
+  "耐火材料产量",
+  "稻谷播种面积",
+  "发明专利授权",
+  "SHIBOR",
+  "猪肉播种面积",
+  "社会融资规模",
+  "金融机构贷款",
+  "地区生产总值",
+  "第一产业增加值",
+  "第二产业增加值",
+  "第三产业增加值",
+  "规模以上工业",
+  "装备制造业",
+  "战略性新兴产业",
+  "工业机器人产量",
+  "新能源汽车产量",
+  "太阳能电池产量",
+  "固定资产投资",
+  "民间固定资产投资",
+  "房地产开发投资",
+  "商品房销售面积",
+  "社会消费品零售总额",
+  "网上零售额",
+  "餐饮收入",
+  "居民消费价格",
+  "工业生产者出厂价格",
+  "货物进出口总额",
+  "出口总额",
+  "进口总额",
+  "贸易顺差",
+  "实际使用外资",
+  "外商直接投资",
+  "跨境电商进出口",
+  "一般公共预算收入",
+  "一般公共预算支出",
+  "税收收入",
+  "地方财政收入",
+  "教育支出",
+  "卫生健康支出",
+  "社会保障支出",
+  "交通运输支出",
+  "城镇新增就业",
+  "城镇调查失业率",
+  "居民人均可支配收入",
+  "城镇居民收入",
+  "农村居民收入",
+  "居民人均消费支出",
+  "全国居民消费支出",
+  "恩格尔系数",
+  "常住人口",
+  "城镇化率",
+  "出生人口",
+  "铁路旅客发送量",
+  "铁路货运量",
+  "公路客运量",
+  "公路货运量",
+  "水路货运量",
+  "民航旅客运输量",
+  "港口货物吞吐量",
+  "快递业务量",
+  "快递业务收入",
+  "电信业务收入",
+  "移动互联网流量",
+  "移动电话用户数",
+  "宽带接入用户数",
+  "软件和信息技术服务业",
+  "集成电路产量",
+  "微型计算机产量",
+  "发电量",
+  "原煤产量",
+  "原油产量",
+  "天然气产量",
+  "钢材产量",
+  "水泥产量",
+  "十种有色金属产量",
+  "化学纤维产量",
+  "汽车产量",
+  "轿车产量",
+  "挖掘机产量",
+  "农产品产量",
+  "夏粮产量",
+  "秋粮产量",
+  "棉花产量",
+  "油料产量",
+  "糖料产量",
+  "水果产量",
+  "蔬菜产量",
+  "肉类总产量",
+  "猪牛羊禽肉产量",
+  "禽蛋产量",
+  "牛奶产量",
+  "水产品产量",
+  "有效发明专利",
+  "技术合同成交额",
+  "研究与试验发展经费",
+  "高新技术企业数",
+  "普通本专科招生",
+  "研究生招生",
+  "医疗卫生机构数",
+  "医院诊疗人次",
+  "养老服务床位",
+  "基本养老保险参保人数",
+  "基本医疗保险参保人数",
+  "绿色贷款余额",
+  "人民币贷款余额",
+  "住户存款余额",
+];
+
+const focusDeckTerms = focusTerms.slice(0, 100);
+const focusCardOptions = [16, 24, 40, 80, 120, 200] as const;
+const defaultFocusCardCount = 40;
+
+function makeFocusCards(cardCount = defaultFocusCardCount) {
+  const pairCount = Math.floor(cardCount / 2);
+  return focusDeckTerms
+    .slice(0, pairCount)
+    .flatMap((text) => [
+      { id: `${text}-a`, text },
+      { id: `${text}-b`, text },
+    ])
+    .sort(() => Math.random() - 0.5);
+}
+
+function formatSeconds(seconds: number) {
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
+}
+
 function sameBlock(a: Block, b: Block) {
   return a.x === b.x && a.y === b.y && a.z === b.z;
 }
@@ -171,7 +312,7 @@ function getProjection(blocks: Block[], view: "front" | "top" | "left") {
 
 export default function ToolboxPage() {
   const [activeCategory, setActiveCategory] = useState<(typeof toolboxCategories)[number]["id"]>("data");
-  const [activeTool, setActiveTool] = useState<ToolId>("formula");
+  const [activeTool, setActiveTool] = useState<ToolId>("speed");
 
   useEffect(() => {
     if (!localStorage.getItem("gongkao-current-user")) {
@@ -197,7 +338,7 @@ export default function ToolboxPage() {
           备考百宝箱
         </span>
         <div className="ml-auto text-xs" style={{ color: "var(--steel)" }}>
-          资料分析 + 空间想象 + 行测记忆卡片
+          资料分析 + 空间想象 + 成语速记卡片
         </div>
       </div>
 
@@ -214,7 +355,7 @@ export default function ToolboxPage() {
                 备考百宝箱
               </h1>
               <p className="max-w-3xl text-sm leading-7" style={{ color: "var(--slate)" }}>
-                复刻百宝箱的资料分析和空间想象工具，并新增行测资料记忆卡片。申论类按你的要求先不接入。
+                复刻百宝箱的资料分析和空间想象工具，并新增成语速记卡片。申论类按你的要求先不接入。
               </p>
             </div>
             <div className="soft-card p-4">
@@ -371,10 +512,9 @@ export default function ToolboxPage() {
 }
 
 function ToolRenderer({ activeTool }: { activeTool: ToolId }) {
-  if (activeTool === "formula") return <FormulaTool />;
   if (activeTool === "speed") return <SpeedTool />;
-  if (activeTool === "abxr") return <AbxrTool />;
   if (activeTool === "table") return <TableTool />;
+  if (activeTool === "focus") return <DataFocusTool />;
   if (activeTool === "fractions") return <FractionTool />;
   if (activeTool === "calculator") return <CalculatorTool />;
   if (activeTool === "timer") return <TimerTool />;
@@ -383,6 +523,93 @@ function ToolRenderer({ activeTool }: { activeTool: ToolId }) {
   if (activeTool === "cut") return <ThreeCutTool />;
   if (activeTool === "views") return <ThreeBlocksTool viewsOnly />;
   return <MemoryCardTool />;
+}
+
+function DataFocusTool() {
+  const [cardCount, setCardCount] = useState(defaultFocusCardCount);
+  const [cards, setCards] = useState(() => makeFocusCards(defaultFocusCardCount));
+  const [picked, setPicked] = useState<number[]>([]);
+  const [matched, setMatched] = useState<Set<string>>(() => new Set<string>());
+  const [seconds, setSeconds] = useState(0);
+  const done = matched.size;
+  const totalPairs = cards.length / 2;
+  const progress = totalPairs ? Math.round((done / totalPairs) * 100) : 0;
+  const focusRows = Math.ceil(cards.length / 4);
+
+  useEffect(() => {
+    if (done === totalPairs) return undefined;
+    const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [done, totalPairs]);
+
+  useEffect(() => {
+    if (picked.length !== 2) return undefined;
+    const [first, second] = picked;
+    if (cards[first].text === cards[second].text) {
+      setMatched((value) => new Set(value).add(cards[first].text));
+      setPicked([]);
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setPicked([]), 650);
+    return () => window.clearTimeout(timeout);
+  }, [cards, picked]);
+
+  const reset = (nextCount = cardCount) => {
+    setCards(makeFocusCards(nextCount));
+    setPicked([]);
+    setMatched(new Set<string>());
+    setSeconds(0);
+  };
+
+  const pick = (index: number) => {
+    const text = cards[index].text;
+    if (matched.has(text) || picked.includes(index) || picked.length === 2) return;
+    setPicked((value) => [...value, index]);
+  };
+
+  return (
+    <section className="data-focus-tool">
+      <div className="data-focus-head">
+        <div className="data-focus-progress">{progress}%</div>
+        <div className="data-focus-options" aria-label="选择训练卡片数量">
+          {focusCardOptions.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => {
+                setCardCount(option);
+                reset(option);
+              }}
+              className={option === cardCount ? "is-active" : undefined}
+            >
+              {option}张
+            </button>
+          ))}
+        </div>
+        <div className="data-focus-time">{formatSeconds(seconds)}</div>
+        <button onClick={() => reset()} className="data-focus-reset" aria-label="重新开始">
+          ↻
+        </button>
+      </div>
+
+      <div className="data-focus-grid">
+        {cards.map((card, index) => {
+          const open = picked.includes(index) || matched.has(card.text);
+          return (
+            <button
+              key={card.id}
+              onClick={() => pick(index)}
+              className={matched.has(card.text) ? "is-matched" : open ? "is-open" : undefined}
+            >
+              {card.text}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="data-focus-foot">{focusRows}×4 · 找出两张文字相同的卡片</div>
+    </section>
+  );
 }
 
 function FormulaTool() {
@@ -1323,10 +1550,10 @@ function MemoryCardTool() {
     }
   }, []);
 
-  const categories = ["全部", ...Array.from(new Set(cards.map((card) => card.category)))];
+  const categories = ["全部", ...Array.from(new Set(cards.map((card) => card.subcategory)))];
   const filtered = cards.filter((card) => {
     if (!showMastered && progress[card.id] === "mastered") return false;
-    const matchCategory = category === "全部" || card.category === category;
+    const matchCategory = category === "全部" || card.subcategory === category || card.category === category;
     const text = `${card.category} ${card.subcategory} ${card.front} ${card.back} ${card.tags.join(" ")}`;
     return matchCategory && text.toLowerCase().includes(query.toLowerCase());
   });
@@ -1373,7 +1600,7 @@ function MemoryCardTool() {
       const parsed = JSON.parse(text) as MemoryCard[];
       next = parsed.map((item, idx) => ({
         id: item.id || `import-${Date.now()}-${idx}`,
-        category: item.category || "行测资料",
+        category: item.category || "成语",
         subcategory: item.subcategory || "导入",
         front: item.front,
         back: item.back,
@@ -1387,7 +1614,7 @@ function MemoryCardTool() {
           if (parts.length < 2) return null;
           return {
             id: `import-${Date.now()}-${idx}`,
-            category: parts[2] || "行测资料",
+            category: parts[2] || "成语",
             subcategory: parts[3] || "导入",
             front: parts[0],
             back: parts[1],
@@ -1407,7 +1634,7 @@ function MemoryCardTool() {
   return (
     <section className="soft-card p-5">
       <div className="mb-4 rounded-xl p-3 text-xs leading-6" style={{ background: "var(--tint-yellow)", color: "var(--charcoal)" }}>
-        已内置行测分类知识卡片，并保留批量导入。可用“正面,背面,分类,小类,标签”逐行导入，也可粘贴 JSON 数组。
+        已替换为成语速记卡片，并保留批量导入。可用“成语,释义,分类,小类,标签”逐行导入，也可粘贴 JSON 数组。
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)_320px] gap-5">
@@ -1434,7 +1661,7 @@ function MemoryCardTool() {
             />
             显示已掌握
           </label>
-          <input value={query} onChange={(event) => (setQuery(event.target.value), setIndex(0))} className="quiet-input mb-4 w-full rounded-xl px-4 py-3 outline-none" placeholder="搜索题干、答案、标签或分类" />
+          <input value={query} onChange={(event) => (setQuery(event.target.value), setIndex(0))} className="quiet-input mb-4 w-full rounded-xl px-4 py-3 outline-none" placeholder="搜索成语、释义、标签或分类" />
 
           <div className="min-h-[320px] rounded-2xl p-6" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
             {activeCard ? (
@@ -1449,7 +1676,7 @@ function MemoryCardTool() {
                 </div>
                 <button onClick={() => setFlipped((value) => !value)} className="mt-5 block min-h-[180px] w-full rounded-2xl p-6 text-left" style={{ background: "var(--surface)", color: "var(--ink)" }}>
                   <div className="text-xs font-semibold" style={{ color: "var(--steel)" }}>
-                    {flipped ? "答案" : "问题"}
+                    {flipped ? "释义速记" : "成语"}
                   </div>
                   <div className="mt-4 whitespace-pre-line text-xl font-bold leading-9">{flipped ? activeCard.back : activeCard.front}</div>
                 </button>
@@ -1488,13 +1715,13 @@ function MemoryCardTool() {
             批量导入
           </div>
           <p className="mt-2 text-xs leading-6" style={{ color: "var(--steel)" }}>
-            支持 JSON 数组，或逐行 CSV/TSV：正面,背面,分类,小类,标签。
+            支持 JSON 数组，或逐行 CSV/TSV：成语,释义,分类,小类,标签。
           </p>
           <textarea
             value={importText}
             onChange={(event) => setImportText(event.target.value)}
             className="quiet-input mt-3 min-h-[190px] w-full rounded-xl px-3 py-3 text-xs outline-none"
-            placeholder={"例：\n两期比重升降看什么？,看部分增长率a与整体增长率b,资料分析,比重,公式"}
+            placeholder={"例：\n缘木求鱼,方向方法错误，目的再正也难成功,成语,方法错位,易混"}
           />
           <button onClick={importCards} className="primary-button mt-3 w-full rounded-lg px-4 py-2 text-sm font-semibold">
             导入卡片

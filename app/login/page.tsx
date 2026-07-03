@@ -73,7 +73,7 @@ export default function LoginPage() {
             <div className="text-sm font-bold">已登录：{loggedInName}</div>
             <div className="text-xs mt-1">可以直接继续学习，也可以切换到另一个账号。</div>
           </div>
-          <button onClick={goNext} className="primary-button w-full h-11 rounded-xl text-sm font-semibold">进入学习桌</button>
+          <button onClick={goNext} className="primary-button w-full h-11 rounded-xl text-sm font-semibold">进入公考私教</button>
           <button onClick={handleSwitchAccount} className="ghost-button w-full h-11 rounded-xl text-sm font-semibold mt-3">切换账号</button>
         </div>
       </div>

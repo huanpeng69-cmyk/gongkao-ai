@@ -5,6 +5,8 @@ import { loadQuestionBank } from "@/lib/question-bank-client";
 import { loadData, recordAnswer } from "@/lib/store";
 import type { Question } from "@/lib/types";
 import {
+  answerToKeys,
+  answerToText,
   getCorrectAnswerContent,
   getCorrectText,
   getDisplayExplanation,
@@ -26,16 +28,13 @@ function parseYear(title = "") {
 
 function answerText(value?: AnswerValue) {
   if (value === undefined || value === "") return "未答";
-  if (typeof value === "boolean") return value ? "正确" : "错误";
-  return Array.isArray(value) ? value.join("") : String(value);
+  return answerToText(value);
 }
 
 function isCorrectAnswer(question: MockQuestion, value?: AnswerValue) {
   if (value === undefined || value === "") return false;
   if (question.type === "multi_choice") {
-    const expected = question.answer as string[];
-    const selected = String(value).split("").sort();
-    return expected.length === selected.length && expected.every((key) => selected.includes(key));
+    return answerToText(question.answer) === answerToText(value);
   }
   if (question.type === "true_false") return value === question.answer;
   return value === question.answer;
@@ -95,7 +94,7 @@ export default function MockExamPage() {
 
   const availableQuestions = useMemo(() => {
     const answeredSet = new Set(answeredIds);
-    return questions.filter((question) => !answeredSet.has(question.id));
+    return questions.filter((question) => question.type !== "essay" && !answeredSet.has(question.id));
   }, [questions, answeredIds]);
 
   const papers = useMemo(() => {
@@ -399,7 +398,7 @@ function ExamOptions({
         const displayHtml = getOptionDisplayHtml(option);
         const selected = question.type === "multi_choice" ? String(answer || "").includes(option.key) : answer === option.key;
         const correct = question.type === "multi_choice"
-          ? submitted && (question.answer as string[]).includes(option.key)
+          ? submitted && answerToKeys(question.answer).includes(option.key)
           : submitted && option.key === question.answer;
         const wrong = submitted && selected && !correct;
 

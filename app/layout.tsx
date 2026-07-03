@@ -6,8 +6,8 @@ import ToastContainer from "@/components/Toast";
 import AuthGate from "@/components/AuthGate";
 
 export const metadata: Metadata = {
-  title: "公考智学 — AI驱动的公务员考试学习系统",
-  description: "错题闭环 · 笔航秒杀 · 智能刷题 · 公共基础知识",
+  title: "公考私教",
+  description: "真题题库、模考训练、错题复习、资料分析工具和 AI 讲解一体化学习应用",
 };
 
 export const viewport: Viewport = {

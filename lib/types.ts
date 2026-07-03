@@ -1,8 +1,8 @@
 // ==================== 题型定义 ====================
-export type QuestionType = 'single_choice' | 'multi_choice' | 'true_false';
+export type QuestionType = 'single_choice' | 'multi_choice' | 'true_false' | 'essay';
 
 export type ModuleKey =
-  | 'smart' | 'yanyu' | 'panduan' | 'ziliao'
+  | 'smart' | 'yanyu' | 'panduan' | 'ziliao' | 'shenlun'
   | 'shuliang' | 'changshi' | 'ggjc';
 
 export interface Option {
@@ -33,6 +33,7 @@ export interface Question {
   explanation: string;
   knowledgePoints: string[];
   source: string;
+  sourceTitle?: string;
   year?: number;
 }
 
@@ -151,6 +152,12 @@ export const MODULES: ModuleConfig[] = [
     description: '增长率 / 比重 / 倍数 / 平均数',
     subModules: ['增长率', '增长量', '比重', '平均数', '倍数', '综合分析'],
     hasChart: true, questionTypes: ['single_choice'],
+  },
+  {
+    key: 'shenlun', name: '申论', icon: '申',
+    description: '归纳概括 / 综合分析 / 贯彻执行 / 申发论述',
+    subModules: ['归纳概括', '综合分析', '提出对策', '贯彻执行', '申发论述'],
+    questionTypes: ['essay'],
   },
   {
     key: 'shuliang', name: '数量关系', icon: '数',
