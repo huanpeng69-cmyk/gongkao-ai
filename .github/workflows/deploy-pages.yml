@@ -1,4 +1,4 @@
-﻿name: Deploy GitHub Pages
+name: Deploy GitHub Pages
 
 on:
   push:
@@ -33,6 +33,7 @@ jobs:
         env:
           MOBILE_EXPORT: "1"
           EMBED_PUBLIC_AI_KEYS: "0"
+          GITHUB_PAGES: "1"
 
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4

@@ -3,6 +3,7 @@ const { loadEnvConfig } = require('@next/env');
 loadEnvConfig(__dirname);
 
 const isMobileExport = process.env.MOBILE_EXPORT === '1';
+const isGitHubPages = process.env.GITHUB_PAGES === '1';
 const embedPublicAiKeys = process.env.EMBED_PUBLIC_AI_KEYS === '1';
 const agnesKey = embedPublicAiKeys ? (process.env.AGNES_API_KEY || '') : '';
 const textModel = process.env.AI_TEXT_MODEL || 'gpt-4.1-mini';
@@ -12,6 +13,7 @@ const imageModel = process.env.AI_IMAGE_MODEL || 'agnes-image-2.1-flash';
 const nextConfig = {
   output: isMobileExport ? 'export' : undefined,
   trailingSlash: isMobileExport,
+  basePath: isGitHubPages ? '/gongkao-ai' : '',
   env: {
     NEXT_PUBLIC_GONGKAO_AGNES_KEY: isMobileExport ? agnesKey : '',
     NEXT_PUBLIC_GONGKAO_AGNES_TEXT_MODEL: isMobileExport ? textModel : '',
