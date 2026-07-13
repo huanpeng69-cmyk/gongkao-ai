@@ -34,23 +34,26 @@ npm run dev
 
 打开 `http://localhost:3000`。
 
-## AI 配置
+## Agnes AI 配置
 
-推荐在应用内「我的 / 系统设置」填写模型配置。发布到 GitHub 前不要提交真实 Key。
+文字讲解和漫画生图已统一使用 Agnes AI：
 
-服务端环境变量可参考 `.env.example`：
+- 网关：`https://apihub.agnes-ai.com/v1`
+- 文字：`POST /v1/chat/completions`
+- 图片：`POST /v1/images/generations`
+- 鉴权：`Authorization: Bearer <AGNES_API_KEY>`
 
-- `AI_BASE_URL`
-- `AI_API_KEY`
-- `AI_MODEL`
-- `AI_AUTH_SCHEME`
-- `IMAGE_BASE_URL`
-- `IMAGE_API_KEY`
-- `IMAGE_MODEL`
+托管网页推荐只在服务端配置：
 
-默认应把真实 Key 放在服务端环境变量中，由 `/api/ai` 和 `/api/image` 代理调用。`NEXT_PUBLIC_*` 变量会进入前端构建产物，只能放公开默认值，不要放真实密钥。
+- `AGNES_API_KEY`
+- `AI_TEXT_MODEL`（默认 `gpt-4.1-mini`）
+- `AI_IMAGE_MODEL`（默认 `agnes-image-2.1-flash`）
+- `AI_IMAGE_SIZE`（默认 `1K`）
+- `AI_IMAGE_RATIO`（默认 `1:1`）
 
-`EMBED_PUBLIC_AI_KEYS=1` 会把 Key 注入静态前端包，仅适合完全私有的 APK/内部分发场景；公开网站和 GitHub Pages 不要开启。
+应用内「我的 / Agnes AI 接口」可为静态站点或 Capacitor 客户端保存设备 Key。留空保存会保留已有 Key；旧供应商 Key 不会迁移或发送到 Agnes 域名。浏览器设备存储不是加密保险箱，公开网站应使用 `/api/ai` 与 `/api/image` 服务端代理。
+
+`EMBED_PUBLIC_AI_KEYS=1` 只适合完全私有的移动构建，它会把 `AGNES_API_KEY` 注入客户端包。公开网站、GitHub Pages 和公开分发 APK 不要开启。
 
 ## Web 构建
 
@@ -86,7 +89,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 1. 将代码推送到 GitHub。
 2. 在 Vercel 导入该 GitHub 仓库。
 3. 构建命令使用 `npm run build`。
-4. 如果需要服务端 AI 兜底配置，在 Vercel Project Settings 里添加环境变量。
+4. 如果需要服务端 Agnes AI 配置，在 Vercel Project Settings 里添加环境变量。
 5. 不要把 `.env`、APK、构建目录或日志提交到仓库。
 
 ## GitHub Pages 自定义域名

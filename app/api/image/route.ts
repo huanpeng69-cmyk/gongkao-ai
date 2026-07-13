@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildOpenAIImageGenerationsUrl } from "@/lib/ai-endpoints";
+import { AGNES_BASE_URL, AGNES_IMAGE_MODEL, AGNES_PROVIDER, agnesAuthHeaders, buildAgnesImagePayload, buildAgnesImageUrl } from "@/lib/agnes-ai";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -11,6 +11,7 @@ type ImageRequestBody = {
   content?: string;
   prompt?: string;
   size?: string;
+  ratio?: string;
 };
 
 type ImageItem = {
@@ -32,16 +33,6 @@ type ImageResponse = {
   url?: string;
   b64_json?: string;
 };
-
-function getAuthHeaders(apiKey: string, authScheme: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (authScheme === "x-api-key") {
-    headers["x-api-key"] = apiKey;
-  } else {
-    headers["Authorization"] = `Bearer ${apiKey}`;
-  }
-  return headers;
-}
 
 function buildFinalPrompt(content: string) {
   return `${COMIC_STORYBOARD_PROMPT}
@@ -92,27 +83,17 @@ function pickImage(data: ImageResponse) {
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as ImageRequestBody;
   const content = String(body.content || body.prompt || "").trim();
-  const size = String(body.size || req.headers.get("x-image-size") || process.env.IMAGE_SIZE || "1024x1024");
+  const size = String(body.size || req.headers.get("x-image-size") || process.env.AI_IMAGE_SIZE || "1K");
+  const ratio = String(body.ratio || req.headers.get("x-image-ratio") || process.env.AI_IMAGE_RATIO || "1:1");
 
   const apiKey =
     req.headers.get("x-image-key") ||
     req.headers.get("x-ai-key") ||
-    process.env.IMAGE_API_KEY ||
-    process.env.AI_API_KEY ||
+    process.env.AGNES_API_KEY ||
+    process.env.AI_IMAGE_API_KEY ||
     "";
-  const baseUrl =
-    req.headers.get("x-image-base") ||
-    req.headers.get("x-ai-base") ||
-    process.env.IMAGE_BASE_URL ||
-    process.env.AI_BASE_URL ||
-    "";
-  const model = req.headers.get("x-image-model") || process.env.IMAGE_MODEL || "gpt-image-1";
-  const authScheme =
-    req.headers.get("x-image-auth") ||
-    req.headers.get("x-ai-auth") ||
-    process.env.IMAGE_AUTH_SCHEME ||
-    process.env.AI_AUTH_SCHEME ||
-    "bearer";
+  const baseUrl = AGNES_BASE_URL;
+  const model = req.headers.get("x-image-model") || process.env.AI_IMAGE_MODEL || AGNES_IMAGE_MODEL;
 
   if (!content) {
     return NextResponse.json({ error: "缺少讲解内容，无法生成漫画分镜。" }, { status: 400 });
@@ -130,23 +111,18 @@ export async function POST(req: Request) {
 
   if (!apiKey || !baseUrl) {
     return NextResponse.json(
-      { error: "生图接口未配置", detail: "请在设置页填写生图 API Key 和 Base URL，或复用文字 AI 接口配置。" },
+      { error: "生图接口未配置", detail: "请在设置页填写 Agnes API Key，或在服务端配置 AGNES_API_KEY。" },
       { status: 400 },
     );
   }
 
-  const endpoint = buildOpenAIImageGenerationsUrl(baseUrl);
+  const endpoint = buildAgnesImageUrl(baseUrl);
 
   try {
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: getAuthHeaders(apiKey, authScheme),
-      body: JSON.stringify({
-        model,
-        prompt: buildFinalPrompt(content),
-        n: 1,
-        size,
-      }),
+      headers: agnesAuthHeaders(apiKey),
+      body: JSON.stringify(buildAgnesImagePayload({ model, prompt: buildFinalPrompt(content), size, ratio })),
       signal: AbortSignal.timeout(180000),
     });
 
@@ -173,7 +149,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
-      source: "ai",
+      source: AGNES_PROVIDER,
       model,
       endpoint,
       ...image,
