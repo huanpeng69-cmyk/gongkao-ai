@@ -1,3 +1,5 @@
+import { AGNES_BASE_URL, AGNES_IMAGE_MODEL, AGNES_IMAGE_SIZE, AGNES_PROVIDER, AGNES_TEXT_MODEL } from "./agnes-ai";
+
 export type HistoryKind = "ai" | "image";
 
 export type HistoryEntry<T = unknown> = {
@@ -128,20 +130,22 @@ export function createHistoryKey(kind: HistoryKind, payload: unknown) {
 export function getAiConfigFingerprint() {
   if (typeof window === "undefined") return {};
   return {
-    provider: localStorage.getItem("gongkao-ai-protocol") || "openai",
-    base: localStorage.getItem("gongkao-ai-base") || "",
-    model: localStorage.getItem("gongkao-ai-model") || "",
-    auth: localStorage.getItem("gongkao-ai-auth") || "bearer",
+    provider: AGNES_PROVIDER,
+    base: AGNES_BASE_URL,
+    model: localStorage.getItem("gongkao-agnes-text-model") || AGNES_TEXT_MODEL,
+    auth: "bearer",
   };
 }
 
 export function getImageConfigFingerprint() {
   if (typeof window === "undefined") return {};
   return {
-    base: localStorage.getItem("gongkao-image-base") || localStorage.getItem("gongkao-ai-base") || "",
-    model: localStorage.getItem("gongkao-image-model") || "gpt-image-1",
-    auth: localStorage.getItem("gongkao-image-auth") || "bearer",
-    size: localStorage.getItem("gongkao-image-size") || "1024x1024",
+    provider: AGNES_PROVIDER,
+    base: AGNES_BASE_URL,
+    model: localStorage.getItem("gongkao-agnes-image-model") || AGNES_IMAGE_MODEL,
+    auth: "bearer",
+    size: localStorage.getItem("gongkao-agnes-image-size") || AGNES_IMAGE_SIZE,
+    ratio: localStorage.getItem("gongkao-agnes-image-ratio") || "1:1",
   };
 }
 

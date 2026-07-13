@@ -1,7 +1,7 @@
 "use client";
 
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
-import { buildAnthropicMessagesUrl, buildOpenAIChatCompletionsUrl } from "./ai-endpoints";
+import { AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, buildAgnesChatUrl } from "./agnes-ai";
 import { toDisplayList, toDisplayText } from "./ai-display";
 import { readSavedAiConfig } from "./default-ai-config";
 
@@ -17,7 +17,7 @@ type AiConfig = {
 
 function getSavedAiConfig(): AiConfig {
   if (typeof window === "undefined") {
-    return { apiKey: "", baseUrl: "", model: "", authScheme: "bearer", protocol: "openai" };
+    return { apiKey: "", baseUrl: "", model: AGNES_TEXT_MODEL, authScheme: "bearer", protocol: AGNES_PROVIDER };
   }
 
   const cfg = readSavedAiConfig();
@@ -38,9 +38,7 @@ export function getSavedAiHeaders() {
 
   if (cfg.protocol) headers["x-ai-provider"] = cfg.protocol;
   if (cfg.apiKey) headers["x-ai-key"] = cfg.apiKey;
-  if (cfg.baseUrl) headers["x-ai-base"] = cfg.baseUrl;
   if (cfg.model) headers["x-ai-model"] = cfg.model;
-  if (cfg.authScheme) headers["x-ai-auth"] = cfg.authScheme;
 
   return headers;
 }
@@ -200,54 +198,31 @@ async function callDirectAi(body: AiBody, imageInputs: string[]) {
       source: "local",
       title: "AI未配置",
       errorType: "接口未配置",
-      analysis: "请先在系统设置中保存 AI Key、Base URL 和模型名。",
+      analysis: "请先在系统设置中保存 Agnes API Key，并确认模型名正确。",
       keyPoints: ["打开系统设置", "填写 AI 接口配置", "保存后重新生成讲解"],
       suggestion: "配置完成后再点击生成讲解。",
     };
   }
 
-  const protocol = cfg.protocol.toLowerCase();
   const prompt = buildPrompt(body, imageInputs.length > 0);
 
   const execute = async (images: string[]) => {
-    if (protocol === "anthropic") {
-      const content = [
-        { type: "text", text: buildPrompt(body, images.length > 0) },
-        ...images
-          .filter((src) => src.startsWith("data:image/"))
-          .map((src) => {
-            const match = src.match(/^data:(image\/[a-z]+);base64,(.+)$/i);
-            return match ? { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } } : null;
-          })
-          .filter(Boolean),
-      ];
-      const data = await nativePostJson(
-        buildAnthropicMessagesUrl(cfg.baseUrl),
-        { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" },
-        { model: cfg.model || "claude-sonnet-4-20250514", max_tokens: 4096, messages: [{ role: "user", content }] },
-      ) as { content?: Array<{ text?: string }> };
-      return data.content?.[0]?.text || "";
-    }
-
     const content = images.length > 0
       ? [{ type: "text", text: buildPrompt(body, true) }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
       : prompt;
-    const headers: Record<string, string> = cfg.authScheme === "x-api-key"
-      ? { "Content-Type": "application/json", "x-api-key": cfg.apiKey }
-      : { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` };
     const data = await nativePostJson(
-      buildOpenAIChatCompletionsUrl(cfg.baseUrl),
-      headers,
-      { model: cfg.model || "deepseek-chat", messages: [{ role: "user", content }], temperature: 0.7, max_tokens: 4096 },
+      buildAgnesChatUrl(cfg.baseUrl),
+      agnesAuthHeaders(cfg.apiKey),
+      { model: cfg.model || AGNES_TEXT_MODEL, messages: [{ role: "user", content }], temperature: 0.7, max_tokens: 4096 },
     ) as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content || "";
   };
 
   try {
-    return { ...normalizeRawText(await execute(imageInputs)), source: protocol };
+    return { ...normalizeRawText(await execute(imageInputs)), source: AGNES_PROVIDER };
   } catch (error) {
     if (imageInputs.length > 0 && isImageUnsupported(error)) {
-      return { ...normalizeRawText(await execute([])), source: protocol, apiError: "当前模型不支持图片输入，已使用同一模型改为纯文本解析。" };
+      return { ...normalizeRawText(await execute([])), source: AGNES_PROVIDER, apiError: "当前模型不支持图片输入，已使用同一模型改为纯文本解析。" };
     }
     throw error;
   }

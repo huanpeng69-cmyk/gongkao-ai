@@ -1,188 +1,108 @@
 import { NextResponse } from "next/server";
-import { buildAnthropicMessagesUrl, buildOpenAIChatCompletionsUrl } from "@/lib/ai-endpoints";
+import {
+  AGNES_BASE_URL,
+  AGNES_IMAGE_MODEL,
+  AGNES_PROVIDER,
+  AGNES_TEXT_MODEL,
+  agnesAuthHeaders,
+  buildAgnesModelsUrl,
+  type AgnesModality,
+} from "@/lib/agnes-ai";
 
-type HealthTest = {
-  name: string;
-  status: "pass" | "fail" | "skip";
-  detail: string;
-  ms?: number;
-};
+function classifyStatus(status: number) {
+  if (status === 401 || status === 403) return "unauthorized";
+  if (status === 404 || status === 405) return "unsupported";
+  return "unreachable";
+}
 
-type Diagnostics = {
-  timestamp: string;
-  config: {
-    provider: string;
-    baseUrl: string;
-    model: string;
-    hasApiKey: boolean;
-    authScheme: string;
-  };
-  serverEnv: {
-    hasEnvKey: boolean;
-    hasEnvBase: boolean;
-    hasEnvModel: boolean;
-    nodeEnv: string;
-  };
-  tests: HealthTest[];
-  suggestion?: string;
-};
+function response(payload: Record<string, unknown>, status = 200) {
+  return NextResponse.json(payload, { status, headers: { "Cache-Control": "no-store" } });
+}
 
-/**
- * GET /api/ai/health
- * 诊断AI接口连通性，返回详细的诊断信息
- * 前端可在设置页调用此接口检测AI配置是否正确
- */
 export async function GET(req: Request) {
-  if (process.env.MOBILE_EXPORT === "1") {
-    return NextResponse.json({
-      status: "static-mobile",
-      diagnostics: {
-        timestamp: new Date().toISOString(),
-        suggestion: "Mobile APK builds use the saved AI settings directly from the app.",
-        tests: [{ name: "移动端静态导出", status: "skip", detail: "APK 内不使用 Next.js 服务端健康检查接口" }],
-      },
-    });
+  // Static GitHub Pages builds have no server route. Return an empty non-JSON
+  // response so the settings page intentionally falls back to direct Agnes BYOK.
+  if (process.env.MOBILE_EXPORT === '1') {
+    return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   }
 
   const url = new URL(req.url);
-  // 支持从 query params 或 headers 读取配置
-  const aiProvider = url.searchParams.get("provider") || req.headers.get("x-ai-provider") || process.env.AI_PROVIDER || "openai";
-  const aiKey = url.searchParams.get("key") || req.headers.get("x-ai-key") || process.env.AI_API_KEY || "";
-  const aiBase = url.searchParams.get("base") || req.headers.get("x-ai-base") || process.env.AI_BASE_URL || "";
-  const aiModel = url.searchParams.get("model") || req.headers.get("x-ai-model") || process.env.AI_MODEL || "";
-  const aiAuth = url.searchParams.get("auth") || req.headers.get("x-ai-auth") || process.env.AI_AUTH_SCHEME || "bearer";
-
-  const diagnostics: Diagnostics = {
-    timestamp: new Date().toISOString(),
-    config: {
-      provider: aiProvider || "(未配置)",
-      baseUrl: aiBase || "(未配置)",
-      model: aiModel || "(未配置)",
-      hasApiKey: !!aiKey,
-      authScheme: aiAuth,
-    },
-    serverEnv: {
-      hasEnvKey: !!process.env.AI_API_KEY,
-      hasEnvBase: !!process.env.AI_BASE_URL,
-      hasEnvModel: !!process.env.AI_MODEL,
-      nodeEnv: process.env.NODE_ENV || "unknown",
-    },
-    tests: [],
+  const modality: AgnesModality = url.searchParams.get("modality") === "image" ? "image" : "text";
+  const headerKey = modality === "image"
+    ? req.headers.get("x-image-key") || req.headers.get("x-ai-key") || ""
+    : req.headers.get("x-ai-key") || "";
+  const apiKey = headerKey || process.env.AGNES_API_KEY ||
+    (modality === "image" ? process.env.AI_IMAGE_API_KEY : process.env.AI_TEXT_API_KEY) || "";
+  const model = modality === "image"
+    ? req.headers.get("x-image-model") || process.env.AI_IMAGE_MODEL || AGNES_IMAGE_MODEL
+    : req.headers.get("x-ai-model") || process.env.AI_TEXT_MODEL || AGNES_TEXT_MODEL;
+  const endpoint = buildAgnesModelsUrl(AGNES_BASE_URL);
+  const diagnostics = {
+    modality,
+    provider: AGNES_PROVIDER,
+    target: endpoint,
+    model,
+    hasApiKey: Boolean(apiKey),
+    test: "models-list",
   };
 
-  // Step 1: 检查配置是否完整
-  if (!aiKey || !aiBase) {
-    diagnostics.tests.push({
-      name: "配置检查",
-      status: "skip",
-      detail: aiKey ? "缺少 Base URL" : aiBase ? "缺少 API Key" : "API Key 和 Base URL 均未配置",
-    });
-    return NextResponse.json({ status: "unconfigured", diagnostics });
-  }
-
-  diagnostics.tests.push({ name: "配置检查", status: "pass", detail: "API Key 和 Base URL 已配置" });
-
-  // Step 2: 构建测试请求 URL
-  let testUrl = "";
-  let testHeaders: Record<string, string> = { "Content-Type": "application/json" };
-  let testBody: string;
-
-  if (aiProvider === "anthropic") {
-    testUrl = buildAnthropicMessagesUrl(aiBase);
-    testHeaders["x-api-key"] = aiKey;
-    testHeaders["anthropic-version"] = "2023-06-01";
-    testBody = JSON.stringify({
-      model: aiModel || "claude-sonnet-4-20250514",
-      max_tokens: 10,
-      messages: [{ role: "user", content: "Say 'ok'" }],
-    });
-  } else {
-    testUrl = buildOpenAIChatCompletionsUrl(aiBase);
-    if (aiAuth === "x-api-key") {
-      testHeaders["x-api-key"] = aiKey;
-    } else {
-      testHeaders["Authorization"] = `Bearer ${aiKey}`;
-    }
-    testBody = JSON.stringify({
-      model: aiModel || "gpt-4o-mini",
-      messages: [{ role: "user", content: "Say 'ok'" }],
-      max_tokens: 256,
+  if (!apiKey) {
+    return response({
+      status: "misconfigured",
+      diagnostics: { ...diagnostics, suggestion: "请填写 Agnes API Key，或在服务端配置 AGNES_API_KEY。" },
     });
   }
 
-  diagnostics.tests.push({ name: "URL构建", status: "pass", detail: testUrl });
-
-  // Step 3: DNS 解析检查
   try {
-    const startTime = Date.now();
-    const res = await fetch(testUrl, {
-      method: "POST",
-      headers: testHeaders,
-      body: testBody,
+    const startedAt = Date.now();
+    const upstream = await fetch(endpoint, {
+      method: "GET",
+      headers: agnesAuthHeaders(apiKey),
       signal: AbortSignal.timeout(15000),
+      cache: "no-store",
     });
-    const elapsed = Date.now() - startTime;
+    const elapsedMs = Date.now() - startedAt;
 
-    if (res.ok) {
-      const data = await res.json();
-      const content = aiProvider === "anthropic"
-        ? data.content?.[0]?.text || ""
-        : data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
-      diagnostics.tests.push({
-        name: "API连通性",
-        status: "pass",
-        detail: `HTTP ${res.status} · 模型回复: "${content.slice(0, 50)}"`,
-        ms: elapsed,
+    if (!upstream.ok) {
+      const detail = (await upstream.text().catch(() => "")).slice(0, 240);
+      const status = classifyStatus(upstream.status);
+      const suggestion = status === "unauthorized"
+        ? "Agnes API Key 无效、已过期或无权访问，请在 Agnes 控制台检查。"
+        : status === "unsupported"
+          ? "Agnes 当前未开放模型列表端点；配置已保存，但无法执行非计费检测。"
+          : "Agnes 服务暂时不可达，请稍后重试。";
+      return response({
+        status,
+        diagnostics: { ...diagnostics, elapsedMs, httpStatus: upstream.status, detail, suggestion },
       });
-      return NextResponse.json({ status: "ok", diagnostics });
-    } else {
-      const errText = await res.text().catch(() => "");
-      diagnostics.tests.push({
-        name: "API连通性",
-        status: "fail",
-        detail: `HTTP ${res.status} · ${errText.slice(0, 200)}`,
-        ms: elapsed,
-      });
-
-      // 提供更详细的错误解读
-      if (res.status === 401) {
-        diagnostics.suggestion = "API Key 无效或已过期，请检查配置";
-      } else if (res.status === 403) {
-        diagnostics.suggestion = "API Key 没有访问此模型的权限，或账户余额不足";
-      } else if (res.status === 404) {
-        diagnostics.suggestion = "API 地址或模型名称不正确，请确认 Base URL 和 Model 设置";
-      } else if (res.status === 429) {
-        diagnostics.suggestion = "请求频率过高，请稍后再试";
-      } else if (res.status >= 500) {
-        diagnostics.suggestion = "AI服务商服务器错误，请稍后再试";
-      }
-      return NextResponse.json({ status: "error", diagnostics });
-    }
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    let detail = errMsg;
-    let suggestion = "";
-
-    if (errMsg.includes("timeout") || errMsg.includes("AbortError")) {
-      detail = "请求超时(15秒)";
-      suggestion = "网络连接超时，可能是：1) 网络不通 2) AI服务商在当前网络下不可访问(如GFW限制) 3) Base URL不正确";
-    } else if (errMsg.includes("ENOTFOUND") || errMsg.includes("getaddrinfo")) {
-      detail = "DNS解析失败";
-      suggestion = "域名无法解析，请检查 Base URL 是否正确";
-    } else if (errMsg.includes("ECONNREFUSED")) {
-      detail = "连接被拒绝";
-      suggestion = "目标服务器拒绝连接，请检查端口和协议(http/https)";
-    } else if (errMsg.includes("fetch failed") || errMsg.includes("ECONNRESET")) {
-      detail = "网络连接失败";
-      suggestion = "无法连接到AI服务商。如果在中国大陆，部分AI服务(如OpenAI、Anthropic)需要代理才能访问。建议使用DeepSeek、通义千问等国内可直接访问的服务。";
-    } else if (errMsg.includes("SELF_SIGNED_CERT") || errMsg.includes("certificate")) {
-      detail = "SSL证书错误";
-      suggestion = "SSL证书验证失败，请检查网络环境是否安全";
     }
 
-    diagnostics.tests.push({ name: "API连通性", status: "fail", detail });
-    if (suggestion) diagnostics.suggestion = suggestion;
-
-    return NextResponse.json({ status: "error", diagnostics });
+    const data = await upstream.json().catch(() => ({})) as { data?: Array<{ id?: string }> };
+    const availableModels = Array.isArray(data.data)
+      ? data.data.map((item) => String(item.id || "")).filter(Boolean)
+      : [];
+    return response({
+      status: "ok",
+      diagnostics: {
+        ...diagnostics,
+        elapsedMs,
+        httpStatus: upstream.status,
+        modelListed: availableModels.length ? availableModels.includes(model) : undefined,
+        suggestion: availableModels.length && !availableModels.includes(model)
+          ? "连接成功，但当前模型未出现在模型列表中；请确认模型名是否正确。"
+          : "Agnes 非计费连通性检测通过。",
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const timeout = /timeout|aborted/i.test(message);
+    return response({
+      status: "unreachable",
+      diagnostics: {
+        ...diagnostics,
+        detail: timeout ? "连接 Agnes 超时（15 秒）。" : message.slice(0, 240),
+        suggestion: timeout ? "请检查网络后重试。" : "请检查网络、系统时间和 Agnes 服务状态。",
+      },
+    });
   }
 }

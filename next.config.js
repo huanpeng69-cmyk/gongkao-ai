@@ -4,48 +4,30 @@ loadEnvConfig(__dirname);
 
 const isMobileExport = process.env.MOBILE_EXPORT === '1';
 const embedPublicAiKeys = process.env.EMBED_PUBLIC_AI_KEYS === '1';
-const xiaomiName = process.env.XIAOMI_AI_NAME || process.env.AI_NAME || '\u5c0f\u7c73MiMo';
-const mobileAiBase = process.env.XIAOMI_BASE_URL || process.env.AI_BASE_URL || 'https://token-plan-cn.xiaomimimo.com';
-const mobileAiKey = embedPublicAiKeys ? (process.env.XIAOMI_API_KEY || process.env.AI_API_KEY || '') : '';
-const mobileAiModel = process.env.XIAOMI_MODEL || process.env.AI_MODEL || 'mimo-v2.5';
-const mobileAiProtocol = process.env.XIAOMI_PROVIDER || process.env.AI_PROVIDER || 'openai';
-const mobileAiAuth = process.env.XIAOMI_AUTH_SCHEME || process.env.AI_AUTH_SCHEME || 'bearer';
-const mobileImageBase = process.env.XIAOMI_IMAGE_BASE_URL || process.env.IMAGE_BASE_URL || 'https://wisart.klsf.cc/v1';
-const mobileImageKey = embedPublicAiKeys ? (process.env.XIAOMI_IMAGE_API_KEY || process.env.IMAGE_API_KEY || mobileAiKey) : '';
-const mobileImageModel = process.env.XIAOMI_IMAGE_MODEL || process.env.IMAGE_MODEL || 'gpt-image-2';
-const mobileImageAuth = process.env.XIAOMI_IMAGE_AUTH_SCHEME || process.env.IMAGE_AUTH_SCHEME || mobileAiAuth;
+const agnesKey = embedPublicAiKeys ? (process.env.AGNES_API_KEY || '') : '';
+const textModel = process.env.AI_TEXT_MODEL || 'gpt-4.1-mini';
+const imageModel = process.env.AI_IMAGE_MODEL || 'agnes-image-2.1-flash';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: isMobileExport ? 'export' : undefined,
   trailingSlash: isMobileExport,
   env: {
-    NEXT_PUBLIC_GONGKAO_AI_NAME: isMobileExport ? xiaomiName : '',
-    NEXT_PUBLIC_GONGKAO_AI_BASE: isMobileExport ? mobileAiBase : '',
-    NEXT_PUBLIC_GONGKAO_AI_KEY: isMobileExport ? mobileAiKey : '',
-    NEXT_PUBLIC_GONGKAO_AI_MODEL: isMobileExport ? mobileAiModel : '',
-    NEXT_PUBLIC_GONGKAO_AI_PROTOCOL: isMobileExport ? mobileAiProtocol : '',
-    NEXT_PUBLIC_GONGKAO_AI_AUTH: isMobileExport ? mobileAiAuth : '',
-    NEXT_PUBLIC_GONGKAO_IMAGE_BASE: isMobileExport ? mobileImageBase : '',
-    NEXT_PUBLIC_GONGKAO_IMAGE_KEY: isMobileExport ? mobileImageKey : '',
-    NEXT_PUBLIC_GONGKAO_IMAGE_MODEL: isMobileExport ? mobileImageModel : '',
-    NEXT_PUBLIC_GONGKAO_IMAGE_AUTH: isMobileExport ? mobileImageAuth : '',
-    NEXT_PUBLIC_GONGKAO_IMAGE_SIZE: isMobileExport ? (process.env.IMAGE_SIZE || '1024x1024') : '',
+    NEXT_PUBLIC_GONGKAO_AGNES_KEY: isMobileExport ? agnesKey : '',
+    NEXT_PUBLIC_GONGKAO_AGNES_TEXT_MODEL: isMobileExport ? textModel : '',
+    NEXT_PUBLIC_GONGKAO_AGNES_IMAGE_MODEL: isMobileExport ? imageModel : '',
   },
-  images: {
-    unoptimized: true,
-  },
+  images: { unoptimized: true },
   async headers() {
-    return [
-      {
-        source: '/api/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET,POST,PUT,DELETE,OPTIONS' },
-          { key: 'Access-Control-Allow-Headers', value: 'Content-Type,x-ai-provider,x-ai-key,x-ai-base,x-ai-model,x-ai-auth' },
-        ],
-      },
-    ];
+    return [{
+      source: '/api/:path*',
+      headers: [
+        { key: 'Access-Control-Allow-Origin', value: '*' },
+        { key: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
+        { key: 'Access-Control-Allow-Headers', value: 'Content-Type,x-ai-key,x-ai-model,x-image-key,x-image-model,x-image-size,x-image-ratio' },
+        { key: 'Cache-Control', value: 'no-store' },
+      ],
+    }];
   },
 };
 

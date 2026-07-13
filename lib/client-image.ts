@@ -1,7 +1,7 @@
 "use client";
 
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
-import { buildOpenAIImageGenerationsUrl } from "./ai-endpoints";
+import { AGNES_IMAGE_MODEL, AGNES_PROVIDER, agnesAuthHeaders, buildAgnesImagePayload, buildAgnesImageUrl } from "./agnes-ai";
 import { readSavedImageConfig } from "./default-ai-config";
 
 const COMIC_SYSTEM_PROMPT =
@@ -13,13 +13,6 @@ type ImageBody = Record<string, unknown>;
 
 function isNativeRuntime() {
   return Capacitor.isNativePlatform();
-}
-
-function authHeaders(apiKey: string, authScheme: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (authScheme === "x-api-key") headers["x-api-key"] = apiKey;
-  else headers.Authorization = `Bearer ${apiKey}`;
-  return headers;
 }
 
 function pickImage(data: unknown) {
@@ -61,9 +54,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
       const hasFrontendConfig = Boolean(cfg.apiKey && cfg.baseUrl);
       if (hasFrontendConfig) {
         headers["x-image-key"] = cfg.apiKey;
-        headers["x-image-base"] = cfg.baseUrl;
         if (cfg.model) headers["x-image-model"] = cfg.model;
-        if (cfg.authScheme) headers["x-image-auth"] = cfg.authScheme;
         if (cfg.size) headers["x-image-size"] = cfg.size;
       }
 
@@ -83,18 +74,23 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
   if (!cfg.apiKey || !cfg.baseUrl) {
     return {
       error: "生图接口未配置",
-      detail: "请先在设置页填写生图 API Key 和 Base URL，或使用服务端环境变量配置。",
+      detail: "请先在设置页填写 Agnes API Key，或在服务端配置 AGNES_API_KEY。",
     } as T;
   }
 
-  const endpoint = buildOpenAIImageGenerationsUrl(cfg.baseUrl);
+  const endpoint = buildAgnesImageUrl(cfg.baseUrl);
   const prompt = `${COMIC_SYSTEM_PROMPT}\n\n${String(body.content || "")}`;
   let data: unknown;
   try {
     data = await nativePostJson(
       endpoint,
-      authHeaders(cfg.apiKey, cfg.authScheme),
-      { model: cfg.model || "gpt-image-1", prompt, size: String(body.size || cfg.size || "1024x1024"), n: 1 },
+      agnesAuthHeaders(cfg.apiKey),
+      buildAgnesImagePayload({
+        model: cfg.model || AGNES_IMAGE_MODEL,
+        prompt,
+        size: String(body.size || cfg.size),
+        ratio: cfg.ratio,
+      }),
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -113,7 +109,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
   }
 
   return {
-    source: "image-api",
+    source: AGNES_PROVIDER,
     model: cfg.model,
     ...image,
   } as T;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildAnthropicMessagesUrl, buildOpenAIChatCompletionsUrl } from "@/lib/ai-endpoints";
+import { AGNES_BASE_URL, AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, buildAgnesChatUrl } from "@/lib/agnes-ai";
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 
 export const runtime = "nodejs";
@@ -447,52 +447,39 @@ async function resolveImageDataUrl(input: string) {
   return `data:${contentType};base64,${buffer.toString("base64")}`;
 }
 
-async function callOpenAICompatible(
+async function callAgnes(
   prompt: string,
   images: string[],
-  config?: { apiKey?: string; model?: string; baseUrl?: string; authScheme?: string; maxTokens?: number; temperature?: number }
+  config: { apiKey?: string; model?: string; baseUrl?: string; maxTokens?: number; temperature?: number },
 ) {
-  const apiKey = config ? (config.apiKey || "") : (process.env.AI_API_KEY || "");
-  const model = config ? (config.model || "deepseek-chat") : (process.env.AI_MODEL || "deepseek-chat");
-  const baseUrl = config ? (config.baseUrl || "") : (process.env.AI_BASE_URL || "");
-  const authScheme = config ? (config.authScheme || "bearer") : (process.env.AI_AUTH_SCHEME || "bearer");
+  const apiKey = config.apiKey || "";
+  const model = config.model || AGNES_TEXT_MODEL;
+  if (!apiKey) throw new Error("Agnes API Key 未配置");
 
-  if (!apiKey) throw new Error("API Key not configured");
-  if (!baseUrl) throw new Error("API Base URL not configured");
-
-  const url = buildOpenAIChatCompletionsUrl(baseUrl);
   const body: Record<string, unknown> = {
     model,
-    messages: [
-      {
-        role: "user",
-        content:
-          images.length > 0
-            ? [{ type: "text", text: prompt }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
-            : prompt,
-      },
-    ],
-    temperature: config?.temperature ?? 0.7,
-    max_tokens: config?.maxTokens || 4096,
+    messages: [{
+      role: "user",
+      content: images.length > 0
+        ? [{ type: "text", text: prompt }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
+        : prompt,
+    }],
+    temperature: config.temperature ?? 0.7,
+    max_tokens: config.maxTokens || 4096,
   };
 
-  const res = await fetch(url, {
+  const res = await fetch(buildAgnesChatUrl(config.baseUrl || AGNES_BASE_URL), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(authScheme === "x-api-key" ? { "x-api-key": apiKey } : { Authorization: `Bearer ${apiKey}` }),
-    },
+    headers: agnesAuthHeaders(apiKey),
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
   });
-
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`AI API error [${res.status}]: ${text || res.statusText}`);
+    throw new Error(`Agnes AI error [${res.status}]: ${text || res.statusText}`);
   }
-
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
+  return data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
 }
 
 function isImageInputUnsupportedError(error: unknown) {
@@ -514,7 +501,7 @@ function buildImageUnsupportedResult(input: {
       ? "当前系统设置里的模型不支持图片输入，已尝试改用题干文字、原始解析和补充材料生成解析。若这道题的关键规律只在题图或选项图里，纯文本模型无法可靠判断具体规律。"
       : "当前系统设置里的模型不支持图片输入，而这道题包含题图或选项图。缺少视觉能力时，AI 无法可靠读取图形元素、位置、数量、样式等关键信息，所以不能直接生成具体规律解析。",
     keyPoints: [
-      "小米文本模型已被调用，但它不支持图片输入",
+      "Agnes 文字模型已被调用，但当前模型不支持图片输入",
       "图形题需要支持视觉的模型才能读取题图和选项图",
       "若题库有原始解析，可基于文字解析继续复盘",
       "否则请换支持图片输入的模型，或上传/补充文字版图形特征",
@@ -526,84 +513,13 @@ function buildImageUnsupportedResult(input: {
   };
 }
 
-function parseDataUrl(dataUrl: string) {
-  const match = dataUrl.match(/^data:(image\/[a-z]+);base64,(.+)$/i);
-  if (!match) throw new Error("Invalid data URL");
-  return { mediaType: match[1], data: match[2] };
-}
-
-async function callAnthropic(
-  prompt: string,
-  images: string[],
-  config?: { apiKey?: string; model?: string; baseUrl?: string; maxTokens?: number }
-) {
-  const apiKey = config ? (config.apiKey || "") : (process.env.ANTHROPIC_API_KEY || "");
-  const model = config ? (config.model || "claude-3-5-sonnet-20241022") : (process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022");
-  const baseUrl = config ? (config.baseUrl || "") : (process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com");
-
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
-  if (!baseUrl) throw new Error("ANTHROPIC_BASE_URL not configured");
-
-  const url = buildAnthropicMessagesUrl(baseUrl);
-  const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [
-    { type: "text", text: prompt },
-  ];
-
-  for (const src of images) {
-    const dataUrl = src.startsWith("data:") ? src : await resolveImageDataUrl(src);
-    const { mediaType, data } = parseDataUrl(dataUrl);
-    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data } });
-  }
-
-  const body = {
-    model,
-    max_tokens: config?.maxTokens || 4096,
-    messages: [{ role: "user", content }],
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Anthropic API error [${res.status}]: ${text || res.statusText}`);
-  }
-
-  const data = await res.json();
-  return data.content?.[0]?.text || "";
-}
-
-function getEffectiveAiProvider(frontendConfig: { apiKey?: string; baseUrl?: string; protocol?: string }, preferFrontend = false) {
-  if (preferFrontend || (frontendConfig.apiKey && frontendConfig.baseUrl)) {
-    return (frontendConfig.protocol || "openai").toLowerCase();
-  }
-  return (process.env.AI_PROVIDER || "openai").toLowerCase();
-}
-
-function getEffectiveAiConfig(frontendConfig: {
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
-  authScheme?: string;
-  protocol?: string;
-}, preferFrontend = false) {
-  if (preferFrontend || (frontendConfig.apiKey && frontendConfig.baseUrl)) {
-    return frontendConfig;
-  }
+function getEffectiveAiConfig(frontendKey: string, frontendModel: string) {
   return {
-    apiKey: process.env.AI_API_KEY || "",
-    baseUrl: process.env.AI_BASE_URL || "",
-    model: process.env.AI_MODEL || "",
-    authScheme: process.env.AI_AUTH_SCHEME || "bearer",
-    protocol: process.env.AI_PROVIDER || "openai",
+    apiKey: frontendKey || process.env.AGNES_API_KEY || process.env.AI_TEXT_API_KEY || "",
+    baseUrl: AGNES_BASE_URL,
+    model: frontendModel || process.env.AI_TEXT_MODEL || AGNES_TEXT_MODEL,
+    authScheme: "bearer",
+    protocol: AGNES_PROVIDER,
   };
 }
 
@@ -611,263 +527,97 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      mode,
-      question,
-      userAnswer,
-      correctAnswer,
-      explanation,
-      module,
-      knowledgePoints,
-      context,
-      material,
-      sourceTitle,
-      prompt,
-      images,
-      imageDataUrl,
-      imageDataUrls,
-      imageUrls,
-      imageName,
+      mode, question, userAnswer, correctAnswer, explanation, module, knowledgePoints, context,
+      material, sourceTitle, prompt, images, imageDataUrl, imageDataUrls, imageUrls, imageName,
     } = body;
-
-    // 从请求头读取前端配置
-    const headers = request.headers;
-    const frontendConfig = {
-      apiKey: headers.get("x-ai-key") || "",
-      baseUrl: headers.get("x-ai-base") || "",
-      model: headers.get("x-ai-model") || "",
-      authScheme: headers.get("x-ai-auth") || "bearer",
-      protocol: headers.get("x-ai-provider") || "openai",
-    };
-    const hasFrontendConfigHeaders = Boolean(frontendConfig.apiKey && frontendConfig.baseUrl);
-
-    const effectiveConfig = getEffectiveAiConfig(frontendConfig, hasFrontendConfigHeaders);
-    const provider = getEffectiveAiProvider(effectiveConfig, true);
+    const config = getEffectiveAiConfig(
+      request.headers.get("x-ai-key") || "",
+      request.headers.get("x-ai-model") || "",
+    );
     const requestMode = normalizeMode(mode);
     const imageInputs = uniqueImageInputs([images, imageDataUrl, imageDataUrls, imageUrls].flat());
-    const hasUsableAiConfig = Boolean(effectiveConfig.apiKey && effectiveConfig.baseUrl);
+    const hasUsableAiConfig = Boolean(config.apiKey);
 
     if (requestMode === "analyze") {
       if (!question || !userAnswer || !correctAnswer) {
         return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
       }
-
       const visualQuestion = isVisualQuestionText(question, module);
       const hasUsefulTextExplanation = Boolean(toDisplayText(explanation || context || material));
       if (visualQuestion && imageInputs.length === 0 && !hasUsefulTextExplanation) {
         return NextResponse.json({
-          title: "题图缺失",
-          errorType: "题图信息缺失",
+          title: "题图缺失", errorType: "题图信息缺失",
           analysis: "这道题属于图形/选图类题目，但当前请求没有拿到题图或选项图，也没有可用的原始解析。没有图形细节时无法可靠判断规律和答案，继续生成会变成猜题。",
-          keyPoints: [
-            "请先确认题干图和选项图已正常加载",
-            "图形题必须看元素、位置、数量、样式或对称等具体特征",
-            "没有题图时不能编造规律或答案依据",
-          ],
+          keyPoints: ["请先确认题干图和选项图已正常加载", "图形题必须看元素、位置、数量、样式或对称等具体特征", "没有题图时不能编造规律或答案依据"],
           suggestion: "刷新题库页或上传清晰题目截图后再生成错因讲解。",
-          isCorrect: userAnswer === correctAnswer,
-          source: "guard",
+          isCorrect: userAnswer === correctAnswer, source: "guard",
         });
       }
+      if (!hasUsableAiConfig) return NextResponse.json(localAnalysis(question, userAnswer, correctAnswer, module));
 
-      const useFallback = !hasUsableAiConfig;
-      if (useFallback) {
-        const result = localAnalysis(question, userAnswer, correctAnswer, module);
-        return NextResponse.json(result);
-      }
-
-      const promptText = buildAnalysisPrompt({
-        question,
-        userAnswer,
-        correctAnswer,
-        explanation,
-        context,
-        module,
-        hasImages: imageInputs.length > 0,
-      });
+      const promptText = buildAnalysisPrompt({ question, userAnswer, correctAnswer, explanation, context, module, hasImages: imageInputs.length > 0 });
       let rawText = "";
-
       try {
-        if (provider === "anthropic") {
-          rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
-        } else {
-          rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
-        }
+        rawText = await callAgnes(promptText, imageInputs, config);
       } catch (error) {
-        if (imageInputs.length > 0 && isImageInputUnsupportedError(error)) {
-          const textOnlyPrompt = buildAnalysisPrompt({
-            question,
-            userAnswer,
-            correctAnswer,
-            explanation,
-            context,
-            module,
-            hasImages: false,
-          });
-
-          try {
-            if (provider === "anthropic") {
-              rawText = await callAnthropic(textOnlyPrompt, [], effectiveConfig);
-            } else {
-              rawText = await callOpenAICompatible(textOnlyPrompt, [], effectiveConfig);
-            }
-          } catch {
-            return NextResponse.json(buildImageUnsupportedResult({
-              provider,
-              error,
-              isCorrect: userAnswer === correctAnswer,
-              hasTextFallback: false,
-            }));
-          }
-        } else {
-          throw error;
+        if (imageInputs.length === 0 || !isImageInputUnsupportedError(error)) throw error;
+        try {
+          rawText = await callAgnes(buildAnalysisPrompt({ question, userAnswer, correctAnswer, explanation, context, module, hasImages: false }), [], config);
+        } catch {
+          return NextResponse.json(buildImageUnsupportedResult({ provider: AGNES_PROVIDER, error, isCorrect: userAnswer === correctAnswer, hasTextFallback: false }));
         }
       }
-
-      return NextResponse.json({
-        ...normalizeRawAiText(rawText),
-        isCorrect: userAnswer === correctAnswer,
-        source: provider,
-      });
+      return NextResponse.json({ ...normalizeRawAiText(rawText), isCorrect: userAnswer === correctAnswer, source: AGNES_PROVIDER });
     }
 
     if (requestMode === "explain") {
-      if (!question || !correctAnswer) {
-        return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-      }
-
-      const promptText = buildExplainPrompt({
-        question,
-        correctAnswer,
-        explanation,
-        context,
-        module,
-      });
-
+      if (!question || !correctAnswer) return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      const promptText = buildExplainPrompt({ question, correctAnswer, explanation, context, module });
       let rawText = "";
       try {
-        if (provider === "anthropic") {
-          rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
-        } else {
-          rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
-        }
+        rawText = await callAgnes(promptText, imageInputs, config);
       } catch (error) {
-        if (imageInputs.length > 0 && isImageInputUnsupportedError(error)) {
-          const textOnlyPrompt = buildExplainPrompt({
-            question,
-            correctAnswer,
-            explanation,
-            context,
-            module,
-          });
-          if (provider === "anthropic") {
-            rawText = await callAnthropic(textOnlyPrompt, [], effectiveConfig);
-          } else {
-            rawText = await callOpenAICompatible(textOnlyPrompt, [], effectiveConfig);
-          }
-        } else {
-          throw error;
-        }
+        if (imageInputs.length === 0 || !isImageInputUnsupportedError(error)) throw error;
+        rawText = await callAgnes(promptText, [], config);
       }
-
-      return NextResponse.json({ ...normalizeRawAiText(rawText), source: provider });
+      return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
 
     if (requestMode === "fenbi") {
-      if (!question) {
-        return NextResponse.json({ error: "Missing question" }, { status: 400 });
-      }
-
-      const promptText = buildFenbiQuestionPrompt({
-        question,
-        userAnswer,
-        correctAnswer,
-        analysis: explanation,
-        material,
-        sourceTitle,
-      });
-
-      let rawText = "";
-      if (provider === "anthropic") {
-        rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
-      } else {
-        rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
-      }
-
-      return NextResponse.json({ ...normalizeRawAiText(rawText), source: provider });
+      if (!question) return NextResponse.json({ error: "Missing question" }, { status: 400 });
+      const promptText = buildFenbiQuestionPrompt({ question, userAnswer, correctAnswer, analysis: explanation, material, sourceTitle });
+      const rawText = await callAgnes(promptText, imageInputs, config);
+      return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
 
     if (requestMode === "review") {
-      if (!question) {
-        return NextResponse.json({ error: "Missing question" }, { status: 400 });
-      }
-
-      if (!hasUsableAiConfig) {
-        return NextResponse.json(localReviewKnowledge({
-          question,
-          correctAnswer,
-          explanation,
-          module,
-          knowledgePoints,
-          context,
-        }));
-      }
-
-      const promptText = buildReviewKnowledgePrompt({
-        question,
-        correctAnswer,
-        explanation,
-        module,
-        knowledgePoints,
-        context,
-      });
-
+      if (!question) return NextResponse.json({ error: "Missing question" }, { status: 400 });
+      if (!hasUsableAiConfig) return NextResponse.json(localReviewKnowledge({ question, correctAnswer, explanation, module, knowledgePoints, context }));
+      const promptText = buildReviewKnowledgePrompt({ question, correctAnswer, explanation, module, knowledgePoints, context });
       try {
-        let rawText = "";
-        if (provider === "anthropic") {
-          rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
-        } else {
-          rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
-        }
-
-        return NextResponse.json({ ...normalizeRawAiText(rawText), source: provider });
+        const rawText = await callAgnes(promptText, imageInputs, config);
+        return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
       } catch (error) {
-        console.error("Review knowledge AI fallback:", error);
+        console.error("Review knowledge Agnes fallback:", error);
         return NextResponse.json({
-          ...localReviewKnowledge({
-            question,
-            correctAnswer,
-            explanation,
-            module,
-            knowledgePoints,
-            context,
-          }),
-          apiError: `外部 AI 暂不可用，已使用本地讲解：${clipText(error instanceof Error ? error.message : String(error), 220)}`,
+          ...localReviewKnowledge({ question, correctAnswer, explanation, module, knowledgePoints, context }),
+          apiError: `Agnes AI 暂不可用，已使用本地讲解：${clipText(error instanceof Error ? error.message : String(error), 220)}`,
         });
       }
     }
 
     if (requestMode === "tutor") {
       const promptText = buildHomeTutorPrompt({ prompt, context, imageName });
-
-      let rawText = "";
-      if (provider === "anthropic") {
-        rawText = await callAnthropic(promptText, imageInputs, effectiveConfig);
-      } else {
-        rawText = await callOpenAICompatible(promptText, imageInputs, effectiveConfig);
-      }
-
-      return NextResponse.json({ ...normalizeRawAiText(rawText), source: provider });
+      const rawText = await callAgnes(promptText, imageInputs, config);
+      return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
 
     return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
   } catch (error) {
-    console.error("AI API Error:", error);
+    console.error("Agnes AI API Error:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unknown error",
-        details: error instanceof Error ? error.stack : undefined,
-      },
-      { status: 500 },
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
