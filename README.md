@@ -46,7 +46,7 @@ npm run dev
 托管网页推荐只在服务端配置：
 
 - `AGNES_API_KEY`
-- `AI_TEXT_MODEL`（默认 `gpt-4.1-mini`）
+- `AI_TEXT_MODEL`（默认 `agnes-2.0-flash`）
 - `AI_IMAGE_MODEL`（默认 `agnes-image-2.1-flash`）
 - `AI_IMAGE_SIZE`（默认 `1K`）
 - `AI_IMAGE_RATIO`（默认 `1:1`）
