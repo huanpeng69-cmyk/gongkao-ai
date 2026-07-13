@@ -70,7 +70,7 @@ function toKnowledgeErrorResult(error: unknown, status?: number): KnowledgeResul
     title: "讲解生成失败",
     analysis: `生成讲解时遇到问题：${message}`,
     keyPoints: [
-      "检查设置里的 AI Key、Base URL 和模型名",
+      "检查设置里的 Agnes API Key 和模型名",
       "确认设置页的接口测试可以通过",
       "配置完成后可以重新点击生成讲解",
     ],
