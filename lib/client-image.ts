@@ -3,11 +3,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { AGNES_IMAGE_MODEL, AGNES_PROVIDER, agnesAuthHeaders, buildAgnesImagePayload, buildAgnesImageUrl } from "./agnes-ai";
 import { readSavedImageConfig } from "./default-ai-config";
-
-const COMIC_SYSTEM_PROMPT =
-  "生成一组用于公考题目讲解的多格漫画分镜，必须先阅读并理解下方输入的题干、材料、选项、正确答案和AI讲解，再把解题过程画出来。\n\n" +
-  "硬性要求：1. 输入内容是唯一依据，不得自创题目、人物剧情、数字、选项或结论。2. 每一格都要对应真实解题步骤。3. 如果输入提到图形、表格、统计材料、选项文字，画面中必须用简化白板或卡片还原关键特征。4. 如果输入信息不足，画面应表现题目信息不足或需要补充截图。5. 画面文字只放短标题、关键词、公式、箭头和答案标记。\n\n" +
-  "视觉风格：现代教育插画，干净明亮，学习软件感；重点放在白板、题干卡片、选项对比、表格、图形、推导箭头和最终答案。";
+import { buildComicPrompt } from "./comic-prompt";
 
 type ImageBody = Record<string, unknown>;
 
@@ -79,7 +75,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
   }
 
   const endpoint = buildAgnesImageUrl(cfg.baseUrl);
-  const prompt = `${COMIC_SYSTEM_PROMPT}\n\n${String(body.content || "")}`;
+  const prompt = buildComicPrompt(String(body.content || ""));
   let data: unknown;
   try {
     data = await nativePostJson(

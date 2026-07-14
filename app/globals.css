@@ -1914,3 +1914,62 @@ a {
     grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 }
+.question-material p,
+.fenbi-explanation-body p {
+  margin: 0 0 0.75em;
+}
+
+.question-material p:last-child,
+.fenbi-explanation-body p:last-child {
+  margin-bottom: 0;
+}
+
+.question-material .question-formula-image,
+.fenbi-explanation-body .question-formula-image,
+.answer-inline .question-formula-image {
+  display: inline-block;
+  width: auto;
+  max-width: min(100%, 720px);
+  height: auto;
+  max-height: 3.4em;
+  margin: 0 0.18em;
+  border-radius: 0;
+  vertical-align: middle;
+  background: transparent;
+  image-rendering: auto;
+  transform: none;
+}
+
+.question-material .question-content-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 12px auto 16px;
+}
+
+.question-stem {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.answer-inline {
+  display: inline;
+  font-size: inherit;
+}
+
+.answer-inline > span,
+.answer-inline p,
+.answer-inline div {
+  display: inline;
+  margin: 0;
+}
+
+.question-material table {
+  display: table;
+  min-width: max-content;
+}
+
+.fenbi-explanation-body {
+  overflow-x: auto;
+  overflow-wrap: anywhere;
+}

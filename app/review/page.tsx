@@ -18,12 +18,16 @@ import {
   answerToText,
   buildQuestionPromptText,
   getAnswerContent,
+  getAnswerContentHtml,
   getCorrectAnswerContent,
+  getCorrectAnswerContentHtml,
   getCorrectText,
   getDisplayExplanation,
+  getDisplayExplanationHtml,
   getOptionDisplayHtml,
   getOptionDisplayText,
   getQuestionImageSources,
+  getQuestionDisplayHtml,
   getQuestionMaterialHtml,
   getQuestionText,
   stripHtml,
@@ -146,7 +150,7 @@ export default function ReviewPage() {
         scope: "review_analysis",
         questionId: current.questionId,
         config: getAiConfigFingerprint(),
-        body: { ...body, requestVersion: "ai-card-v3-detailed" },
+        body: { ...body, requestVersion: "ai-card-v4-verified" },
       });
       const cached = await readHistory<KnowledgeResult>(historyKey);
       if (hasUsefulKnowledgeResult(cached)) {
@@ -174,9 +178,11 @@ export default function ReviewPage() {
   if (reviewMode && current) {
     const q = current.question;
     const materialHtml = getQuestionMaterialHtml(q);
-    const questionText = getQuestionText(q);
+    const questionHtml = getQuestionDisplayHtml(q);
     const correctText = getCorrectText(q);
     const correctContent = getCorrectAnswerContent(q);
+    const correctContentHtml = getCorrectAnswerContentHtml(q);
+    const originalExplanationHtml = getDisplayExplanationHtml(q);
     const knowledgeErrorType = toDisplayText(knowledgeResult?.errorType);
     const knowledgeAnalysis = toDisplayText(knowledgeResult?.analysis || knowledgeResult?.answerSummary);
     const knowledgeKeyPoints = toDisplayList(knowledgeResult?.keyPoints);
@@ -223,7 +229,7 @@ export default function ReviewPage() {
               />
             )}
 
-            <div className="text-sm font-medium leading-relaxed mb-5 whitespace-pre-line" style={{ color: "var(--ink)" }}>{questionText}</div>
+            <div className="question-material question-stem text-sm font-medium leading-relaxed mb-5" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: questionHtml }} />
 
             {q.type === "single_choice" && q.options && (
               <div className="flex flex-col gap-2">
@@ -296,16 +302,24 @@ export default function ReviewPage() {
                 <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--steel)" }}>答案</div>
                 <div className="text-sm">
                   <span className="font-semibold" style={{ color: "var(--brand-green)" }}>正确答案：{correctText}</span>
-                  {correctContent && correctContent !== correctText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{correctContent}</span>}
+                  {correctContent && correctContent !== correctText && <span className="question-material answer-inline ml-2" style={{ color: "var(--charcoal)" }} dangerouslySetInnerHTML={{ __html: correctContentHtml }} />}
                   {userAnswer && (
                     <>
                       <span className="mx-2">·</span>
                       <span>你的选择：{userAnswer}</span>
-                      {getAnswerContent(q, userAnswer) !== userAnswer && <span className="ml-1">{getAnswerContent(q, userAnswer)}</span>}
+                      {getAnswerContent(q, userAnswer) !== userAnswer && <span className="question-material answer-inline ml-1" dangerouslySetInnerHTML={{ __html: getAnswerContentHtml(q, userAnswer) }} />}
                     </>
                   )}
                 </div>
               </div>
+              {originalExplanationHtml && (
+                <section className="fenbi-explanation mb-4">
+                  <div className="fenbi-explanation-head">
+                    <span className="fenbi-explanation-brand"><span className="fenbi-explanation-icon">?</span>?????</span>
+                  </div>
+                  <div className="fenbi-explanation-body question-material" dangerouslySetInnerHTML={{ __html: originalExplanationHtml }} />
+                </section>
+              )}
               <div className="rounded-lg p-4 mb-4" style={{ background: "var(--surface)", border: "1px solid var(--hairline)" }}>
                 <div className="flex items-center gap-3">
                   <div>
@@ -477,10 +491,6 @@ function OptionBody({ option }: { option: Option }) {
   const displayText = getOptionDisplayText(option);
   const displayHtml = getOptionDisplayHtml(option);
 
-  if (displayText) {
-    return <span style={{ color: "var(--charcoal)" }}>{displayText}</span>;
-  }
-
   if (displayHtml) {
     return (
       <span
@@ -488,6 +498,10 @@ function OptionBody({ option }: { option: Option }) {
         dangerouslySetInnerHTML={{ __html: displayHtml }}
       />
     );
+  }
+
+  if (displayText) {
+    return <span style={{ color: "var(--charcoal)" }}>{displayText}</span>;
   }
 
   return null;

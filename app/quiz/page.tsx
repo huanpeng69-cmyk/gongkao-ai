@@ -25,12 +25,16 @@ import {
   answerToText,
   buildQuestionPromptText,
   getAnswerContent,
+  getAnswerContentHtml,
   getCorrectAnswerContent,
+  getCorrectAnswerContentHtml,
   getCorrectText,
   getDisplayExplanation,
+  getDisplayExplanationHtml,
   getOptionDisplayHtml,
   getOptionDisplayText,
   getQuestionImageSources,
+  getQuestionDisplayHtml,
   getQuestionMaterialHtml,
   getQuestionText,
   stripHtml,
@@ -246,7 +250,7 @@ function hasUsefulAiResult(result?: AiResult | null) {
 }
 
 function withAiCacheVersion(body: Record<string, unknown>) {
-  return { ...body, requestVersion: "ai-card-v3-detailed" };
+  return { ...body, requestVersion: "ai-card-v4-verified" };
 }
 
 export default function QuestionBankPage() {
@@ -464,6 +468,7 @@ export default function QuestionBankPage() {
     const body = {
       content,
       size: localStorage.getItem("gongkao-image-size") || "1024x1024",
+      promptVersion: "comic-v4-clear-chinese",
     };
     const historyKey = createHistoryKey("image", {
       scope: "quiz_comic",
@@ -901,12 +906,15 @@ function QuestionBlock({
   const aiKeyPoints = toDisplayList(aiResult?.keyPoints);
   const isAiSource = Boolean(aiSource && aiSource !== "local" && aiSource !== "local_fallback");
   const materialHtml = getQuestionMaterialHtml(question);
-  const questionText = getQuestionText(question);
+  const questionHtml = getQuestionDisplayHtml(question);
   const userAnswerText = answerToText(answer);
   const userAnswerContent = getAnswerContent(question, answer);
+  const userAnswerContentHtml = getAnswerContentHtml(question, answer);
   const correctAnswerText = getCorrectText(question);
   const correctAnswerContent = getCorrectAnswerContent(question);
+  const correctAnswerContentHtml = getCorrectAnswerContentHtml(question);
   const explanation = getDisplayExplanation(question);
+  const explanationHtml = getDisplayExplanationHtml(question);
   const isFenbiSource = question.source === "fenbi" || /粉笔|fenbi/i.test(`${question.source || ""} ${question.sourceTitle || ""}`);
   const isEssay = question.type === "essay";
   const showAnswerPanel = submitted || isEssay;
@@ -928,7 +936,11 @@ function QuestionBlock({
         />
       )}
 
-      <div className="text-base leading-relaxed mb-5 whitespace-pre-line" style={{ color: "var(--ink)" }}>{questionText}</div>
+      <div
+        className="question-material question-stem text-base leading-relaxed mb-5"
+        style={{ color: "var(--ink)" }}
+        dangerouslySetInnerHTML={{ __html: questionHtml }}
+      />
 
       {!isEssay && (
         <AnswerOptions
@@ -968,12 +980,12 @@ function QuestionBlock({
               <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
                 <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>你的答案</span>
                 <span style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>{userAnswerText}</span>
-                {userAnswerContent && userAnswerContent !== userAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{userAnswerContent}</span>}
+                {userAnswerContent && userAnswerContent !== userAnswerText && <span className="question-material answer-inline ml-2" style={{ color: "var(--charcoal)" }} dangerouslySetInnerHTML={{ __html: userAnswerContentHtml }} />}
               </div>
               <div className="rounded-md px-3 py-2 text-sm" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
                 <span className="text-xs font-semibold mr-2" style={{ color: "var(--steel)" }}>正确答案</span>
                 <span style={{ color: "var(--brand-green)" }}>{correctAnswerText}</span>
-                {correctAnswerContent && correctAnswerContent !== correctAnswerText && <span className="ml-2" style={{ color: "var(--charcoal)" }}>{correctAnswerContent}</span>}
+                {correctAnswerContent && correctAnswerContent !== correctAnswerText && <span className="question-material answer-inline ml-2" style={{ color: "var(--charcoal)" }} dangerouslySetInnerHTML={{ __html: correctAnswerContentHtml }} />}
               </div>
             </div>
           )}
@@ -988,7 +1000,7 @@ function QuestionBlock({
                   答案 <strong>{correctAnswerText}</strong>
                 </span>}
               </div>
-              <div className="fenbi-explanation-body whitespace-pre-wrap">{explanation}</div>
+              <div className="fenbi-explanation-body question-material" dangerouslySetInnerHTML={{ __html: explanationHtml }} />
             </section>
           )}
           <div className="flex flex-wrap gap-1.5 mt-3">
@@ -1134,13 +1146,13 @@ function AnswerOptions({
             >
               {option.key}
             </span>
-            {displayText ? (
-              <span className="leading-relaxed" style={{ color: "var(--charcoal)" }}>{displayText}</span>
-            ) : displayHtml ? (
+            {displayHtml ? (
               <span
                 className="question-material flex-1"
                 dangerouslySetInnerHTML={{ __html: displayHtml }}
               />
+            ) : displayText ? (
+              <span className="leading-relaxed" style={{ color: "var(--charcoal)" }}>{displayText}</span>
             ) : null}
           </button>
         );

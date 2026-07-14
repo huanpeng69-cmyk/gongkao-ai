@@ -4,6 +4,7 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, buildAgnesChatUrl } from "./agnes-ai";
 import { toDisplayList, toDisplayText } from "./ai-display";
 import { readSavedAiConfig } from "./default-ai-config";
+import { buildDirectAiPrompt } from "./ai-prompts";
 
 type AiBody = Record<string, unknown>;
 
@@ -129,52 +130,6 @@ function isImageUnsupported(error: unknown) {
   return /image input|support image|vision|multi[-\s]?modal|modalit/i.test(message);
 }
 
-function buildPrompt(body: AiBody, hasImages: boolean) {
-  const mode = String(body.mode || "");
-  if (mode === "tutor") {
-    return `你是公考私教。请根据用户问题或上传题目生成结构化讲解，严格返回 JSON。
-
-用户问题：${toDisplayText(body.prompt) || "请根据上传图片或补充信息讲解题目"}
-图片文件：${toDisplayText(body.imageName) || "无"}
-补充信息：${toDisplayText(body.context) || "无"}
-是否包含图片：${hasImages ? "是" : "否"}
-
-返回格式：
-{
-  "title": "10字以内标题",
-  "analysis": "120-220字讲解",
-  "keyPoints": ["3-6条字符串要点"],
-  "method": "可迁移的方法步骤",
-  "mnemonic": "记忆口诀，没有则空字符串",
-  "example": "同类例题或类比",
-  "answerSummary": "一句话总结"
-}`;
-  }
-
-  return `你是公考笔试私教。请分析以下错题，并严格返回 JSON。
-
-题目：${toDisplayText(body.question)}
-用户答案：${toDisplayText(body.userAnswer) || "未作答"}
-正确答案：${toDisplayText(body.correctAnswer) || "未知"}
-模块：${toDisplayText(body.module) || "未分类"}
-原始解析：${toDisplayText(body.explanation) || "无"}
-补充材料：${toDisplayText(body.context || body.material) || "无"}
-是否包含题图/选项图：${hasImages ? "是" : "否"}
-
-返回格式：
-{
-  "title": "10字以内标题",
-  "errorType": "知识盲区/概念混淆/审题失误/计算推理错误/思路偏差/时间压力/题图信息缺失",
-  "analysis": "120-220字总述：先定位题型和错因，再讲正确切入点",
-  "keyPoints": ["3-5条字符串要点"],
-  "method": "可迁移的解题步骤",
-  "mnemonic": "记忆口诀，没有则空字符串",
-  "example": "同类题识别例子或类比",
-  "suggestion": "针对性复习建议",
-  "bihangTip": "如果适合秒杀技巧，给出技巧名称和口诀"
-}`;
-}
-
 async function nativePostJson(url: string, headers: Record<string, string>, data: unknown) {
   if (isNativeRuntime()) {
     const response = await CapacitorHttp.post({ url, headers, data, connectTimeout: 120000, readTimeout: 120000 });
@@ -204,16 +159,16 @@ async function callDirectAi(body: AiBody, imageInputs: string[]) {
     };
   }
 
-  const prompt = buildPrompt(body, imageInputs.length > 0);
+  const prompt = buildDirectAiPrompt(body, imageInputs.length > 0);
 
   const execute = async (images: string[]) => {
     const content = images.length > 0
-      ? [{ type: "text", text: buildPrompt(body, true) }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
+      ? [{ type: "text", text: buildDirectAiPrompt(body, true) }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
       : prompt;
     const data = await nativePostJson(
       buildAgnesChatUrl(cfg.baseUrl),
       agnesAuthHeaders(cfg.apiKey),
-      { model: cfg.model || AGNES_TEXT_MODEL, messages: [{ role: "user", content }], temperature: 0.7, max_tokens: 4096 },
+      { model: cfg.model || AGNES_TEXT_MODEL, messages: [{ role: "user", content }], temperature: 0.25, max_tokens: 4096 },
     ) as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content || "";
   };

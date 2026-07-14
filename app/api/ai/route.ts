@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AGNES_BASE_URL, AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, buildAgnesChatUrl } from "@/lib/agnes-ai";
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
+import { withGongkaoMasterPrompt } from "@/lib/ai-prompts";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -51,22 +52,8 @@ const BIHANG_METHODS: Record<string, BihangMethod> = {
   },
 };
 
-const GONGKAO_MASTER_PROMPT = `你是一位资深公考笔试私教，精通行测、申论、公基。讲解必须优先使用以下内置方法论：
-1. 角色：像靠谱培训老师，先讲方法，再讲题目，给完整解题思路，不只报答案。
-2. 行测总纲：五星据月 + 六略思维。常识用正经人思维、选项矛盾、生活逻辑；时政用"巨星圈"：党/中央 > 中国特色社会主义/社会主义 > 人民 > 国家，遇到核心、根本、首要优先看党的领导；绝对化、时间节点、顿号并列容易设坑。
-3. 言语：逻辑填空找语境呼应和词语辨析；片段阅读抓主题句、转折后、总结句、首尾句；细节题逐项对比原文，警惕偷换、以偏概全、无中生有。
-4. 判断：翻译推理看充分/必要条件，真假推理找矛盾关系；加强削弱先找论点和论据，再用搭桥、拆桥、补论据、否论据；图推按点线角面素、位置、样式排查。
-5. 数量：优先赋值法、方程法、十字交叉、容斥、捆绑插空；先识别题型，再选最快路径。
-6. 资料分析：先读时间、主体、单位、指标；公式包括增长率=增长量/基期量，比重=部分/整体，间隔增长率=r1+r2+r1*r2；速算用截位直除、特征数字、错位加减，先看选项差距。
-7. 申论：点线面整体化。审身份、范围、任务、要求；找五要素：含义/问题/原因/影响/对策；利用转折、递进、并列、因果、条件、标点和高频词找点。
-8. 公基：马哲、公文、中特、经济、管理要先给框架再落细节。
-输出风格：像"公考私教"学习卡片。先给一段120-220字的深度解析总述，语气像老师当面讲清楚；再提炼3-6条"要点归纳"；最后给"记忆口诀"和"经典例题/类比"。不要空泛鼓励，不要堆概念。
-格式纪律：严格返回JSON；所有可展示字段都必须是字符串或字符串数组，数组项绝不能是对象；没有内容就返回空字符串或空数组。`;
-
 function withMasterPrompt(task: string) {
-  return `${GONGKAO_MASTER_PROMPT}
-
-${task}`;
+  return withGongkaoMasterPrompt(task);
 }
 
 function localAnalysis(question: string, userAnswer: string, correctAnswer: string, module?: string) {
@@ -464,7 +451,7 @@ async function callAgnes(
         ? [{ type: "text", text: prompt }, ...images.map((src) => ({ type: "image_url", image_url: { url: src } }))]
         : prompt,
     }],
-    temperature: config.temperature ?? 0.7,
+    temperature: config.temperature ?? 0.25,
     max_tokens: config.maxTokens || 4096,
   };
 

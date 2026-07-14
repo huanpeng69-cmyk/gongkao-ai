@@ -466,7 +466,7 @@ def answer_to_key(value: object, options: list[dict]) -> str | list[str] | bool:
         keys = [answer_to_key(item, options) for item in value]
         flat = [str(item) for item in keys if isinstance(item, str) and item]
         unique = sorted(set("".join(flat)))
-        return unique if len(unique) > 1 else (unique[0] if unique else "")
+        return "".join(unique)
     text = str(value or "").strip().upper()
     if not text:
         return ""
@@ -474,6 +474,11 @@ def answer_to_key(value: object, options: list[dict]) -> str | list[str] | bool:
     if letters:
         keys = [letter for letter in letters if any(opt["key"] == letter for opt in options)]
         return "".join(sorted(set(keys))) if keys else letters[0]
+    if options and re.fullmatch(r"\d+(?:\s*[,??;?]\s*\d+)+", text):
+        indexes = [int(item) for item in re.findall(r"\d+", text)]
+        # Fenbi multi-select answers use zero-based option indexes, e.g. "0,1,2" -> "ABC".
+        if all(0 <= index < len(options) for index in indexes):
+            return "".join(sorted({options[index]["key"] for index in indexes}))
     if text.isdigit() and options:
         num = int(text)
         index = num if 0 <= num < len(options) else num - 1

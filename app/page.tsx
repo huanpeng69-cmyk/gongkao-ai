@@ -361,7 +361,7 @@ function HomeTutorPanel() {
       const historyKey = createHistoryKey("ai", {
         scope: "home_tutor",
         config: getAiConfigFingerprint(),
-        body: { mode: body.mode, prompt: body.prompt, imageDataUrl: body.imageDataUrl, requestVersion: "ai-card-v2" },
+        body: { mode: body.mode, prompt: body.prompt, imageDataUrl: body.imageDataUrl, requestVersion: "ai-card-v4-verified" },
       });
       const cached = await readHistory<TutorResult>(historyKey);
       if (hasUsefulTutorResult(cached)) {

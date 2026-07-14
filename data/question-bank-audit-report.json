@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-07-14T09:33:06.644Z",
+  "dataPath": "C:\\Users\\86131\\Desktop\\gongkao-ai\\data\\gkzhenti_questions.json",
+  "ok": true,
+  "stats": {
+    "totalQuestions": 5242,
+    "explanationImages": 10788,
+    "explanationFormulaImages": 9966,
+    "questionImages": 959,
+    "questionFormulaImages": 379,
+    "materialImages": 3309,
+    "materialFormulaImages": 2459,
+    "optionImages": 1072,
+    "optionsWithImages": 876,
+    "correctOptionsWithImages": 222,
+    "sourceIncompletePlaceholders": 23,
+    "shortExplanations": 22
+  },
+  "errors": [],
+  "warnings": []
+}

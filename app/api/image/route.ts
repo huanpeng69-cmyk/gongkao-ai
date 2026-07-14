@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { AGNES_BASE_URL, AGNES_IMAGE_MODEL, AGNES_PROVIDER, agnesAuthHeaders, buildAgnesImagePayload, buildAgnesImageUrl } from "@/lib/agnes-ai";
+import { buildComicPrompt } from "@/lib/comic-prompt";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const COMIC_STORYBOARD_PROMPT =
-  "生成一组用于公考题目讲解的多格漫画分镜，必须先阅读并理解下方输入的题干、材料、选项、正确答案和AI讲解，再把解题过程画出来。\n\n**硬性要求**：\n1. 输入内容是唯一依据，不得自创题目、人物剧情、数字、选项或结论。\n2. 每一格都要对应真实解题步骤：读题定位→提取条件→排除/计算/推理→锁定答案→方法总结。\n3. 如果输入提到图形、表格、统计材料、选项文字，画面中必须用简化白板/卡片还原关键特征，不能只画泛泛课堂场景。\n4. 如果输入信息不足以确定题目内容，画面应表现“题目信息不足/需要补充截图”，不能乱生成看似完整的题。\n5. 画面文字只放短标题、关键词、公式、箭头和答案标记，保持清晰可读。\n\n**视觉风格**：现代教育插画，干净明亮，学习软件感；老师和学生作为辅助角色，重点放在白板、题干卡片、选项对比、表格/图形、推导箭头和最终答案。\n\n**分镜结构**：建议4-6格，逻辑递进，不做无关铺垫。";
 
 type ImageRequestBody = {
   content?: string;
@@ -33,25 +31,6 @@ type ImageResponse = {
   url?: string;
   b64_json?: string;
 };
-
-function buildFinalPrompt(content: string) {
-  return `${COMIC_STORYBOARD_PROMPT}
-
----
-
-**输入题目与讲解内容**（以下内容是生成分镜的唯一依据）：
-
-${content}
-
----
-
-**重要提醒**：
-- 分镜场景必须完全基于上述题目内容，不得添加无关情节
-- 如果题目包含图形、表格、数据，分镜中必须画出该图形/表格的简化版本
-- 如果输入中出现"视觉题保护"、"题图缺失"、"不能生成可靠漫画讲解"，必须画成信息缺失提示卡，不得生成具体答案或解题规律
-- 解题步骤要与讲解内容的逻辑顺序一致
-- 画面中的文字使用短标题、关键词、公式和箭头标注，确保清晰可读`;
-}
 
 function pickImage(data: ImageResponse) {
   const item = data.data?.[0] || data.images?.[0] || data.output?.[0] || data;
@@ -122,7 +101,7 @@ export async function POST(req: Request) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: agnesAuthHeaders(apiKey),
-      body: JSON.stringify(buildAgnesImagePayload({ model, prompt: buildFinalPrompt(content), size, ratio })),
+      body: JSON.stringify(buildAgnesImagePayload({ model, prompt: buildComicPrompt(content), size, ratio })),
       signal: AbortSignal.timeout(180000),
     });
 

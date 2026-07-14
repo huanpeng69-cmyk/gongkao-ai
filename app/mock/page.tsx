@@ -8,12 +8,14 @@ import {
   answerToKeys,
   answerToText,
   getCorrectAnswerContent,
+  getCorrectAnswerContentHtml,
   getCorrectText,
   getDisplayExplanation,
+  getDisplayExplanationHtml,
   getOptionDisplayHtml,
   getOptionDisplayText,
+  getQuestionDisplayHtml,
   getQuestionMaterialHtml,
-  getQuestionText,
   type AnswerValue,
 } from "@/lib/question-utils";
 
@@ -310,6 +312,9 @@ function MockQuestionCard({
   const correct = submitted && isCorrectAnswer(question, answer);
   const materialHtml = getQuestionMaterialHtml(question);
   const explanation = getDisplayExplanation(question);
+  const explanationHtml = getDisplayExplanationHtml(question);
+  const correctAnswerContent = getCorrectAnswerContent(question);
+  const correctAnswerContentHtml = getCorrectAnswerContentHtml(question);
 
   return (
     <article id={`mock-${question.id}`} onMouseEnter={onFocus} className="pb-6 mb-6" style={{ borderBottom: "1px solid var(--hairline-soft)" }}>
@@ -327,7 +332,7 @@ function MockQuestionCard({
         />
       )}
 
-      <div className="text-base leading-relaxed mb-5 whitespace-pre-line" style={{ color: "var(--ink)" }}>{getQuestionText(question)}</div>
+      <div className="question-material question-stem text-base leading-relaxed mb-5" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: getQuestionDisplayHtml(question) }} />
 
       <ExamOptions question={question} answer={answer} submitted={submitted} onSelect={onSelect} onToggleMulti={onToggleMulti} />
 
@@ -342,9 +347,7 @@ function MockQuestionCard({
               {getCorrectAnswerContent(question) && <span>（{getCorrectAnswerContent(question)}）</span>}
             </div>
             {explanation && (
-              <div className="text-sm leading-relaxed whitespace-pre-line" style={{ color: "var(--slate)" }}>
-                {explanation}
-              </div>
+              <div className="fenbi-explanation-body question-material text-sm leading-relaxed" style={{ color: "var(--slate)" }} dangerouslySetInnerHTML={{ __html: explanationHtml }} />
             )}
           </div>
         </div>
@@ -422,10 +425,10 @@ function ExamOptions({
             >
               {option.key}
             </span>
-            {displayText ? (
-              <span className="leading-relaxed" style={{ color: "var(--charcoal)" }}>{displayText}</span>
-            ) : displayHtml ? (
+            {displayHtml ? (
               <span className="question-material flex-1" dangerouslySetInnerHTML={{ __html: displayHtml }} />
+            ) : displayText ? (
+              <span className="leading-relaxed" style={{ color: "var(--charcoal)" }}>{displayText}</span>
             ) : null}
           </button>
         );
