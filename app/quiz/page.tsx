@@ -185,26 +185,25 @@ function buildComicContent(question: PracticeQuestion, answer?: AnswerValue, aiR
   const questionPrompt = buildQuestionPromptText(question);
   const material = stripHtml(getQuestionMaterialHtml(question));
   const aiAnalysis = aiResult?.analysis ? String(aiResult.analysis) : "";
-  const aiSuggestion = aiResult?.suggestion ? String(aiResult.suggestion) : "";
   const imageSources = getClientImageSources(question);
   const visualQuestion = isVisualQuestion(question);
   const explanation = getDisplayExplanation(question);
 
   return [
-    `题目来源：${question.sourceTitle || question.source || "题库"}`,
-    `模块：${question.module} / ${question.subModule}`,
-    visualQuestion ? "【视觉题保护】本题疑似图形/选图题。漫画必须基于题图、选项图、原始解析或AI讲解中的明确图形特征生成；缺少这些信息时禁止编造规律和答案。" : "",
-    visualQuestion && imageSources.length === 0 && !explanation && !aiAnalysis ? "【视觉题保护】题图缺失：当前没有可用题图、原始解析或AI图形特征讲解，不能生成可靠漫画讲解。" : "",
-    imageSources.length ? `题图/选项图数量：${imageSources.length}。图片地址：${imageSources.join("；")}` : "",
+    `题型：${question.module} / ${question.subModule}`,
+    visualQuestion
+      ? "【视觉题保护】只能依据题图、选项图、原始解析或AI讲解中明确可见的图形特征作图；信息不足时不得编造图形规律或答案。"
+      : "",
+    visualQuestion && imageSources.length === 0 && !explanation && !aiAnalysis
+      ? "【视觉题保护】题图缺失且没有可靠文字解析，只能提示信息不足，不得猜测。"
+      : "",
+    imageSources.length ? `题图/选项图：${imageSources.join("；")}` : "",
     material ? `题干材料：${material}` : "",
-    questionPrompt,
-    `用户答案：${answerToText(answer) || "未作答"}`,
-    `用户答案内容：${getAnswerContent(question, answer) || "未作答"}`,
+    `完整题目：${questionPrompt}`,
     `正确答案：${getCorrectText(question)}`,
     `正确答案内容：${getCorrectAnswerContent(question)}`,
-    `原始解析：${explanation}`,
-    aiAnalysis ? `AI讲解：${aiAnalysis}` : "",
-    aiSuggestion ? `复习建议：${aiSuggestion}` : "",
+    explanation ? `原始解析：${explanation}` : "",
+    aiAnalysis ? `AI讲解（仅作补充，若与题库冲突以题库答案和原始解析为准）：${aiAnalysis}` : "",
     question.knowledgePoints?.length ? `知识点：${question.knowledgePoints.join("、")}` : "",
   ].filter(Boolean).join("\n\n");
 }
@@ -467,8 +466,9 @@ export default function QuestionBankPage() {
     const content = buildComicContent(question, answer, aiResults[question.id]);
     const body = {
       content,
-      size: localStorage.getItem("gongkao-image-size") || "1024x1024",
-      promptVersion: "comic-v8-six-panel-teaching",
+      size: "1K",
+      ratio: "16:9",
+      promptVersion: "comic-v9-dense-study-infographic",
     };
     const historyKey = createHistoryKey("image", {
       scope: "quiz_comic",

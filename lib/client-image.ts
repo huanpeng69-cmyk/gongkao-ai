@@ -57,7 +57,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
       const res = await fetch("/api/image", {
         method: "POST",
         headers,
-        body: JSON.stringify({ ...body, size: body.size || cfg.size }),
+        body: JSON.stringify({ ...body, size: body.size || cfg.size, ratio: body.ratio || cfg.ratio }),
       });
       if ((res.headers.get("content-type") || "").includes("application/json")) {
         return res.json();
@@ -85,7 +85,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
         model: cfg.model || AGNES_IMAGE_MODEL,
         prompt,
         size: String(body.size || cfg.size),
-        ratio: cfg.ratio,
+        ratio: String(body.ratio || cfg.ratio || "16:9"),
       }),
     );
   } catch (error) {
