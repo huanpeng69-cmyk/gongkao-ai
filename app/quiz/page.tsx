@@ -468,7 +468,7 @@ export default function QuestionBankPage() {
     const body = {
       content,
       size: localStorage.getItem("gongkao-image-size") || "1024x1024",
-      promptVersion: "comic-v7-six-grid-clear-chinese",
+      promptVersion: "comic-v8-six-panel-teaching",
     };
     const historyKey = createHistoryKey("image", {
       scope: "quiz_comic",
