@@ -2,9 +2,9 @@
 
 import { AGNES_BASE_URL, AGNES_NAME, AGNES_PROVIDER, AGNES_TEXT_MODEL, isAgnesUrl } from "./agnes-ai";
 
-export const THIRD_PARTY_IMAGE_BASE_URL = "https://wisart.klsf.cc/v1";
+export const THIRD_PARTY_IMAGE_BASE_URL = "https://wisart.kuaileshifu.com";
 export const THIRD_PARTY_IMAGE_MODEL = "gpt-image-2";
-export const THIRD_PARTY_IMAGE_SIZE = "1024x1024";
+export const THIRD_PARTY_IMAGE_SIZE = "1200x675";
 
 export type SavedAiConfig = {
   name: typeof AGNES_NAME;
@@ -36,7 +36,15 @@ const KEYS = {
 
 const LEGACY_AI_BASE = "gongkao-ai-base";
 const LEGACY_AI_KEY = "gongkao-ai-key";
-const CONFIG_VERSION = "2026-07-15-third-party-image-v1";
+const CONFIG_VERSION = "2026-07-15-wisart-official-v2";
+const LEGACY_IMAGE_BASE_URLS = new Set([
+  "https://wisart.klsf.cc",
+  "https://wisart.klsf.cc/v1",
+]);
+
+function normalizedUrl(value: string) {
+  return value.trim().replace(/\/+$/, "").toLowerCase();
+}
 
 function imageDefault(): SavedImageConfig {
   return {
@@ -66,16 +74,26 @@ export function ensureDefaultAiConfig() {
   if (typeof window === "undefined") return;
   migrateAgnesKey();
   const image = imageDefault();
+  const storedImageBase = localStorage.getItem(KEYS.imageBaseUrl) || "";
+  const isLegacyImageBase = LEGACY_IMAGE_BASE_URLS.has(normalizedUrl(storedImageBase));
   if (!localStorage.getItem(KEYS.textModel)) {
     localStorage.setItem(KEYS.textModel, process.env.NEXT_PUBLIC_GONGKAO_AGNES_TEXT_MODEL || AGNES_TEXT_MODEL);
   }
-  if (!localStorage.getItem(KEYS.imageBaseUrl)) localStorage.setItem(KEYS.imageBaseUrl, image.baseUrl);
+  if (!storedImageBase || isLegacyImageBase) localStorage.setItem(KEYS.imageBaseUrl, image.baseUrl);
   if (!localStorage.getItem(KEYS.imageApiKey) && image.apiKey) localStorage.setItem(KEYS.imageApiKey, image.apiKey);
-  if (!localStorage.getItem(KEYS.imageAuthScheme)) localStorage.setItem(KEYS.imageAuthScheme, image.authScheme);
-  if (!localStorage.getItem(KEYS.imageModel) || localStorage.getItem(KEYS.version) !== CONFIG_VERSION) {
+  const activeImageBase = isLegacyImageBase || !storedImageBase ? image.baseUrl : storedImageBase;
+  if (normalizedUrl(activeImageBase) === normalizedUrl(THIRD_PARTY_IMAGE_BASE_URL)) {
+    localStorage.setItem(KEYS.imageAuthScheme, "bearer");
+  } else if (!localStorage.getItem(KEYS.imageAuthScheme)) {
+    localStorage.setItem(KEYS.imageAuthScheme, image.authScheme);
+  }
+  if (!localStorage.getItem(KEYS.imageModel)) {
     localStorage.setItem(KEYS.imageModel, image.model);
   }
-  if (!localStorage.getItem(KEYS.imageSize)) localStorage.setItem(KEYS.imageSize, image.size);
+  const storedImageSize = localStorage.getItem(KEYS.imageSize) || "";
+  if (!storedImageSize || (isLegacyImageBase && storedImageSize === "1024x1024")) {
+    localStorage.setItem(KEYS.imageSize, image.size);
+  }
   localStorage.setItem(KEYS.version, CONFIG_VERSION);
 }
 
@@ -123,9 +141,11 @@ export function readSavedImageConfig(): SavedImageConfig {
 }
 
 export function saveImageConfig(cfg: SavedImageConfig) {
-  localStorage.setItem(KEYS.imageBaseUrl, cfg.baseUrl.trim() || THIRD_PARTY_IMAGE_BASE_URL);
+  const baseUrl = cfg.baseUrl.trim() || THIRD_PARTY_IMAGE_BASE_URL;
+  const authScheme = normalizedUrl(baseUrl) === normalizedUrl(THIRD_PARTY_IMAGE_BASE_URL) ? "bearer" : cfg.authScheme;
+  localStorage.setItem(KEYS.imageBaseUrl, baseUrl);
   if (cfg.apiKey.trim()) localStorage.setItem(KEYS.imageApiKey, cfg.apiKey.trim());
-  localStorage.setItem(KEYS.imageAuthScheme, cfg.authScheme);
+  localStorage.setItem(KEYS.imageAuthScheme, authScheme);
   localStorage.setItem(KEYS.imageModel, cfg.model.trim() || THIRD_PARTY_IMAGE_MODEL);
   localStorage.setItem(KEYS.imageSize, cfg.size || THIRD_PARTY_IMAGE_SIZE);
 }

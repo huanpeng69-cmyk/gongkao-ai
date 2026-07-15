@@ -71,7 +71,7 @@ function pickImage(data: ImageResponse) {
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as ImageRequestBody;
   const content = String(body.content || body.prompt || "").trim();
-  const size = String(body.size || req.headers.get("x-image-size") || process.env.IMAGE_SIZE || "1024x1024");
+  const size = String(body.size || req.headers.get("x-image-size") || process.env.IMAGE_SIZE || "1200x675");
 
   const apiKey =
     req.headers.get("x-image-key") ||
@@ -123,8 +123,10 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model,
         prompt: buildComicPrompt(content),
-        n: 1,
         size,
+        quality: "auto",
+        n: 1,
+        response_format: "b64_json",
       }),
       signal: AbortSignal.timeout(180000),
     });

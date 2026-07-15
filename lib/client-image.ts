@@ -52,6 +52,7 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
   const cfg = readSavedImageConfig();
 
   if (!isNativeRuntime()) {
+    let proxyDetail = "";
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       const hasFrontendConfig = Boolean(cfg.apiKey && cfg.baseUrl);
@@ -71,9 +72,18 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
       if ((res.headers.get("content-type") || "").includes("application/json")) {
         return res.json();
       }
-    } catch {
-      // Static hosts such as GitHub Pages do not provide Next.js API routes.
+      proxyDetail = `本地图片代理返回了 HTTP ${res.status}，但没有返回 JSON。`;
+    } catch (error) {
+      proxyDetail = error instanceof Error ? error.message : String(error);
     }
+
+    const isGitHubPages = window.location.hostname.endsWith("github.io");
+    return {
+      error: "当前网页版无法直接调用 WisArt 生图接口",
+      detail: isGitHubPages
+        ? "WisArt 官方接口不允许 GitHub Pages 跨域直连，静态网站也无法安全代理 API Key。请使用新版 APK 生成漫画，或改用支持 /api/image 服务端代理的网站。"
+        : `当前网站的 /api/image 服务端代理不可用。请使用新版 APK，或将网站部署到支持 Next.js API 路由的服务器。${proxyDetail ? `（${proxyDetail}）` : ""}`,
+    } as T;
   }
 
   if (!cfg.apiKey || !cfg.baseUrl) {
@@ -90,7 +100,14 @@ export async function requestImage<T = Record<string, unknown>>(body: ImageBody)
     data = await nativePostJson(
       endpoint,
       authHeaders(cfg.apiKey, cfg.authScheme),
-      { model: cfg.model || "gpt-image-2", prompt, size: String(body.size || cfg.size || "1024x1024"), n: 1 },
+      {
+        model: cfg.model || "gpt-image-2",
+        prompt,
+        size: String(body.size || cfg.size || "1200x675"),
+        quality: "auto",
+        n: 1,
+        response_format: "b64_json",
+      },
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

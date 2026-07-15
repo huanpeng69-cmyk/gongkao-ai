@@ -22,7 +22,7 @@ import { getCurrentDisplayName, logoutUser } from "@/lib/auth";
 
 type TestState = { status: "idle" | "testing" | "ok" | "fail"; detail: string };
 const idleTest: TestState = { status: "idle", detail: "" };
-const imageSizes = ["1024x1024", "1024x1536", "1536x1024"];
+const imageSizes = ["1200x675", "16:9", "1024x1024", "928x1664", "3000x1000"];
 
 async function directAgnesHealth(apiKey: string) {
   if (!apiKey) throw new Error("请先保存 Agnes API Key。");
@@ -46,7 +46,7 @@ export default function SettingsPage() {
   const [imageKeyDraft, setImageKeyDraft] = useState("");
   const [hasImageKey, setHasImageKey] = useState(false);
   const [showImageKey, setShowImageKey] = useState(false);
-  const [imageAuthScheme, setImageAuthScheme] = useState<"bearer" | "x-api-key">("bearer");
+  const imageAuthScheme: "bearer" = "bearer";
   const [imageModel, setImageModel] = useState(THIRD_PARTY_IMAGE_MODEL);
   const [imageSize, setImageSize] = useState(THIRD_PARTY_IMAGE_SIZE);
   const [saved, setSaved] = useState(false);
@@ -61,7 +61,6 @@ export default function SettingsPage() {
     setTextModel(text.model);
     setImageBaseUrl(image.baseUrl);
     setHasImageKey(hasSavedImageKey());
-    setImageAuthScheme(image.authScheme);
     setImageModel(image.model);
     setImageSize(image.size);
   }, []);
@@ -91,10 +90,15 @@ export default function SettingsPage() {
     const image = readSavedImageConfig();
     const activeKey = imageKeyDraft.trim() || image.apiKey;
     if (!imageBaseUrl.trim() || !imageModel.trim() || !activeKey) {
-      setImageTest({ status: "fail", detail: "请填写第三方图片 Base URL、API Key 和图片模型。" });
+      setImageTest({ status: "fail", detail: "请填写 WisArt 图片 Base URL、API Key 和图片模型。" });
       return;
     }
-    setImageTest({ status: "ok", detail: "图片接口配置完整；为避免扣费，未实际生成测试图片。" });
+    const endpoint = buildOpenAIImageGenerationsUrl(imageBaseUrl);
+    if (endpoint !== "https://wisart.kuaileshifu.com/v1/images/generations") {
+      setImageTest({ status: "fail", detail: `当前生成地址为 ${endpoint}，请确认是否为 WisArt 官方接口。` });
+      return;
+    }
+    setImageTest({ status: "ok", detail: "WisArt 官方接口配置正确；使用 Bearer 鉴权和 b64_json 返回格式。为避免扣费，未实际生成图片。" });
   };
 
   const deleteTextKey = () => {
@@ -137,11 +141,11 @@ export default function SettingsPage() {
             <SecretInput label="Agnes API Key" value={textKeyDraft} onChange={setTextKeyDraft} show={showTextKey} onToggle={() => setShowTextKey((v) => !v)} hasSaved={hasTextKey} onDelete={deleteTextKey} />
           </ConfigCard>
 
-          <ConfigCard title="漫画生图" subtitle="原第三方图片接口 · OpenAI 兼容协议" endpoint={buildOpenAIImageGenerationsUrl(imageBaseUrl)} test={imageTest} onTest={testImage}>
+          <ConfigCard title="漫画生图" subtitle="WisArt 官方图片接口 · Bearer 鉴权 · OpenAI 兼容协议" endpoint={buildOpenAIImageGenerationsUrl(imageBaseUrl)} test={imageTest} onTest={testImage}>
             <TextInput label="图片 Base URL" value={imageBaseUrl} onChange={setImageBaseUrl} placeholder={THIRD_PARTY_IMAGE_BASE_URL} />
             <SecretInput label="图片 API Key" value={imageKeyDraft} onChange={setImageKeyDraft} show={showImageKey} onToggle={() => setShowImageKey((v) => !v)} hasSaved={hasImageKey} onDelete={deleteImageKey} />
             <div className="grid grid-cols-3 gap-3">
-              <SelectField label="认证" value={imageAuthScheme} values={["bearer", "x-api-key"]} onChange={(v) => setImageAuthScheme(v as "bearer" | "x-api-key")} />
+              <ReadOnlyField label="认证" value="Bearer" mono />
               <TextInput label="图片模型" value={imageModel} onChange={setImageModel} placeholder={THIRD_PARTY_IMAGE_MODEL} />
               <SelectField label="尺寸" value={imageSize} values={imageSizes} onChange={setImageSize} />
             </div>
@@ -156,7 +160,7 @@ export default function SettingsPage() {
         <section className="rounded-xl p-5 mb-6" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
           <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--ink)" }}>应用内代理</h3>
           <ApiRow method="POST" route="/api/ai" desc="Agnes 文字讲解" />
-          <ApiRow method="POST" route="/api/image" desc="第三方漫画生图" />
+          <ApiRow method="POST" route="/api/image" desc="WisArt 漫画生图" />
         </section>
         <div className="text-center"><Link href="/" className="text-sm" style={{ color: "var(--primary)" }}>返回首页</Link></div>
       </main>

@@ -7,11 +7,11 @@ const isGitHubPages = process.env.GITHUB_PAGES === '1';
 const embedPublicAiKeys = process.env.EMBED_PUBLIC_AI_KEYS === '1';
 const agnesKey = embedPublicAiKeys ? (process.env.AGNES_API_KEY || '') : '';
 const textModel = process.env.AI_TEXT_MODEL || 'agnes-2.0-flash';
-const imageBase = process.env.IMAGE_BASE_URL || 'https://wisart.klsf.cc/v1';
+const imageBase = process.env.IMAGE_BASE_URL || 'https://wisart.kuaileshifu.com';
 const imageKey = embedPublicAiKeys ? (process.env.IMAGE_API_KEY || '') : '';
 const imageModel = process.env.IMAGE_MODEL || 'gpt-image-2';
 const imageAuth = process.env.IMAGE_AUTH_SCHEME || 'bearer';
-const imageSize = process.env.IMAGE_SIZE || '1024x1024';
+const imageSize = process.env.IMAGE_SIZE || '1200x675';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
