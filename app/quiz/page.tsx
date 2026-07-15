@@ -20,6 +20,7 @@ import { preloadImages } from "@/lib/image-optimizer";
 import { loadQuestionBank } from "@/lib/question-bank-client";
 import { requestAi } from "@/lib/client-ai";
 import { requestImage } from "@/lib/client-image";
+import { COMIC_PROMPT_VERSION } from "@/lib/comic-prompt";
 import {
   answerToKeys,
   answerToText,
@@ -466,8 +467,8 @@ export default function QuestionBankPage() {
     const content = buildComicContent(question, answer, aiResults[question.id]);
     const body = {
       content,
-      size: localStorage.getItem("gongkao-image-size") || "1024x1024",
-      promptVersion: "comic-v2-anime-six-panel",
+      size: localStorage.getItem("gongkao-image-size") || "1200x675",
+      promptVersion: COMIC_PROMPT_VERSION,
     };
     const historyKey = createHistoryKey("image", {
       scope: "quiz_comic",
