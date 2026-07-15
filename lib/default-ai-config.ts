@@ -1,14 +1,10 @@
 "use client";
 
-import {
-  AGNES_BASE_URL,
-  AGNES_IMAGE_MODEL,
-  AGNES_IMAGE_SIZE,
-  AGNES_NAME,
-  AGNES_PROVIDER,
-  AGNES_TEXT_MODEL,
-  isAgnesUrl,
-} from "./agnes-ai";
+import { AGNES_BASE_URL, AGNES_NAME, AGNES_PROVIDER, AGNES_TEXT_MODEL, isAgnesUrl } from "./agnes-ai";
+
+export const THIRD_PARTY_IMAGE_BASE_URL = "https://wisart.klsf.cc/v1";
+export const THIRD_PARTY_IMAGE_MODEL = "gpt-image-2";
+export const THIRD_PARTY_IMAGE_SIZE = "1024x1024";
 
 export type SavedAiConfig = {
   name: typeof AGNES_NAME;
@@ -20,80 +16,88 @@ export type SavedAiConfig = {
 };
 
 export type SavedImageConfig = {
-  baseUrl: typeof AGNES_BASE_URL;
+  baseUrl: string;
   apiKey: string;
-  authScheme: "bearer";
+  authScheme: "bearer" | "x-api-key";
   model: string;
   size: string;
-  ratio: string;
 };
 
 const KEYS = {
-  apiKey: "gongkao-agnes-api-key",
+  agnesApiKey: "gongkao-agnes-api-key",
   textModel: "gongkao-agnes-text-model",
-  imageModel: "gongkao-agnes-image-model",
-  imageSize: "gongkao-agnes-image-size",
-  imageRatio: "gongkao-agnes-image-ratio",
+  imageBaseUrl: "gongkao-image-base",
+  imageApiKey: "gongkao-image-key",
+  imageAuthScheme: "gongkao-image-auth",
+  imageModel: "gongkao-image-model",
+  imageSize: "gongkao-image-size",
   version: "gongkao-ai-default-config-version",
 };
 
-const LEGACY_KEYS = {
-  baseUrl: "gongkao-ai-base",
-  apiKey: "gongkao-ai-key",
-  imageBaseUrl: "gongkao-image-base",
-  imageApiKey: "gongkao-image-key",
-};
+const LEGACY_AI_BASE = "gongkao-ai-base";
+const LEGACY_AI_KEY = "gongkao-ai-key";
+const CONFIG_VERSION = "2026-07-15-third-party-image-v1";
 
-const CONFIG_VERSION = "2026-07-13-agnes-v2";
+function imageDefault(): SavedImageConfig {
+  return {
+    baseUrl: process.env.NEXT_PUBLIC_GONGKAO_IMAGE_BASE || THIRD_PARTY_IMAGE_BASE_URL,
+    apiKey: process.env.NEXT_PUBLIC_GONGKAO_IMAGE_KEY || "",
+    authScheme: process.env.NEXT_PUBLIC_GONGKAO_IMAGE_AUTH === "x-api-key" ? "x-api-key" : "bearer",
+    model: process.env.NEXT_PUBLIC_GONGKAO_IMAGE_MODEL || THIRD_PARTY_IMAGE_MODEL,
+    size: process.env.NEXT_PUBLIC_GONGKAO_IMAGE_SIZE || THIRD_PARTY_IMAGE_SIZE,
+  };
+}
 
-function publicKeyDefault() {
+function publicAgnesKey() {
   return process.env.NEXT_PUBLIC_GONGKAO_AGNES_KEY || process.env.NEXT_PUBLIC_GONGKAO_AI_KEY || "";
 }
 
 function migrateAgnesKey() {
-  const existing = localStorage.getItem(KEYS.apiKey);
+  const existing = localStorage.getItem(KEYS.agnesApiKey);
   if (existing) return existing;
-
-  const legacyBase = localStorage.getItem(LEGACY_KEYS.baseUrl) || "";
-  const legacyImageBase = localStorage.getItem(LEGACY_KEYS.imageBaseUrl) || "";
-  const legacyKey = isAgnesUrl(legacyBase) ? localStorage.getItem(LEGACY_KEYS.apiKey) || "" : "";
-  const legacyImageKey = isAgnesUrl(legacyImageBase) ? localStorage.getItem(LEGACY_KEYS.imageApiKey) || "" : "";
-  const safeKey = legacyKey || legacyImageKey || publicKeyDefault();
-  if (safeKey) localStorage.setItem(KEYS.apiKey, safeKey);
-  return safeKey;
+  const legacyBase = localStorage.getItem(LEGACY_AI_BASE) || "";
+  const safeKey = isAgnesUrl(legacyBase) ? localStorage.getItem(LEGACY_AI_KEY) || "" : "";
+  const value = safeKey || publicAgnesKey();
+  if (value) localStorage.setItem(KEYS.agnesApiKey, value);
+  return value;
 }
 
 export function ensureDefaultAiConfig() {
   if (typeof window === "undefined") return;
-  if (localStorage.getItem(KEYS.version) === CONFIG_VERSION) return;
-
   migrateAgnesKey();
+  const image = imageDefault();
   if (!localStorage.getItem(KEYS.textModel)) {
     localStorage.setItem(KEYS.textModel, process.env.NEXT_PUBLIC_GONGKAO_AGNES_TEXT_MODEL || AGNES_TEXT_MODEL);
   }
-  if (!localStorage.getItem(KEYS.imageModel)) {
-    localStorage.setItem(KEYS.imageModel, process.env.NEXT_PUBLIC_GONGKAO_AGNES_IMAGE_MODEL || AGNES_IMAGE_MODEL);
+  if (!localStorage.getItem(KEYS.imageBaseUrl)) localStorage.setItem(KEYS.imageBaseUrl, image.baseUrl);
+  if (!localStorage.getItem(KEYS.imageApiKey) && image.apiKey) localStorage.setItem(KEYS.imageApiKey, image.apiKey);
+  if (!localStorage.getItem(KEYS.imageAuthScheme)) localStorage.setItem(KEYS.imageAuthScheme, image.authScheme);
+  if (!localStorage.getItem(KEYS.imageModel) || localStorage.getItem(KEYS.version) !== CONFIG_VERSION) {
+    localStorage.setItem(KEYS.imageModel, image.model);
   }
-  if (!localStorage.getItem(KEYS.imageSize)) localStorage.setItem(KEYS.imageSize, AGNES_IMAGE_SIZE);
-  if (!localStorage.getItem(KEYS.imageRatio)) localStorage.setItem(KEYS.imageRatio, "1:1");
+  if (!localStorage.getItem(KEYS.imageSize)) localStorage.setItem(KEYS.imageSize, image.size);
   localStorage.setItem(KEYS.version, CONFIG_VERSION);
 }
 
 export function hasSavedAgnesKey() {
   if (typeof window === "undefined") return false;
   ensureDefaultAiConfig();
-  return Boolean(localStorage.getItem(KEYS.apiKey));
+  return Boolean(localStorage.getItem(KEYS.agnesApiKey));
+}
+
+export function hasSavedImageKey() {
+  if (typeof window === "undefined") return false;
+  ensureDefaultAiConfig();
+  return Boolean(localStorage.getItem(KEYS.imageApiKey));
 }
 
 export function readSavedAiConfig(): SavedAiConfig {
-  if (typeof window === "undefined") {
-    return { name: AGNES_NAME, baseUrl: AGNES_BASE_URL, apiKey: "", authScheme: "bearer", protocol: AGNES_PROVIDER, model: AGNES_TEXT_MODEL };
-  }
+  if (typeof window === "undefined") return { name: AGNES_NAME, baseUrl: AGNES_BASE_URL, apiKey: "", authScheme: "bearer", protocol: AGNES_PROVIDER, model: AGNES_TEXT_MODEL };
   ensureDefaultAiConfig();
   return {
     name: AGNES_NAME,
     baseUrl: AGNES_BASE_URL,
-    apiKey: localStorage.getItem(KEYS.apiKey) || "",
+    apiKey: localStorage.getItem(KEYS.agnesApiKey) || "",
     authScheme: "bearer",
     protocol: AGNES_PROVIDER,
     model: localStorage.getItem(KEYS.textModel) || AGNES_TEXT_MODEL,
@@ -101,33 +105,37 @@ export function readSavedAiConfig(): SavedAiConfig {
 }
 
 export function saveAiConfig(cfg: Pick<SavedAiConfig, "apiKey" | "model">) {
-  if (cfg.apiKey.trim()) localStorage.setItem(KEYS.apiKey, cfg.apiKey.trim());
+  if (cfg.apiKey.trim()) localStorage.setItem(KEYS.agnesApiKey, cfg.apiKey.trim());
   localStorage.setItem(KEYS.textModel, cfg.model.trim() || AGNES_TEXT_MODEL);
 }
 
 export function readSavedImageConfig(): SavedImageConfig {
-  if (typeof window === "undefined") {
-    return { baseUrl: AGNES_BASE_URL, apiKey: "", authScheme: "bearer", model: AGNES_IMAGE_MODEL, size: AGNES_IMAGE_SIZE, ratio: "1:1" };
-  }
+  const fallback = imageDefault();
+  if (typeof window === "undefined") return fallback;
   ensureDefaultAiConfig();
   return {
-    baseUrl: AGNES_BASE_URL,
-    apiKey: localStorage.getItem(KEYS.apiKey) || "",
-    authScheme: "bearer",
-    model: localStorage.getItem(KEYS.imageModel) || AGNES_IMAGE_MODEL,
-    size: localStorage.getItem(KEYS.imageSize) || AGNES_IMAGE_SIZE,
-    ratio: localStorage.getItem(KEYS.imageRatio) || "1:1",
+    baseUrl: localStorage.getItem(KEYS.imageBaseUrl) || fallback.baseUrl,
+    apiKey: localStorage.getItem(KEYS.imageApiKey) || fallback.apiKey,
+    authScheme: localStorage.getItem(KEYS.imageAuthScheme) === "x-api-key" ? "x-api-key" : "bearer",
+    model: localStorage.getItem(KEYS.imageModel) || fallback.model,
+    size: localStorage.getItem(KEYS.imageSize) || fallback.size,
   };
 }
 
-export function saveImageConfig(cfg: Pick<SavedImageConfig, "apiKey" | "model" | "size" | "ratio">) {
-  if (cfg.apiKey.trim()) localStorage.setItem(KEYS.apiKey, cfg.apiKey.trim());
-  localStorage.setItem(KEYS.imageModel, cfg.model.trim() || AGNES_IMAGE_MODEL);
-  localStorage.setItem(KEYS.imageSize, cfg.size || AGNES_IMAGE_SIZE);
-  localStorage.setItem(KEYS.imageRatio, cfg.ratio || "1:1");
+export function saveImageConfig(cfg: SavedImageConfig) {
+  localStorage.setItem(KEYS.imageBaseUrl, cfg.baseUrl.trim() || THIRD_PARTY_IMAGE_BASE_URL);
+  if (cfg.apiKey.trim()) localStorage.setItem(KEYS.imageApiKey, cfg.apiKey.trim());
+  localStorage.setItem(KEYS.imageAuthScheme, cfg.authScheme);
+  localStorage.setItem(KEYS.imageModel, cfg.model.trim() || THIRD_PARTY_IMAGE_MODEL);
+  localStorage.setItem(KEYS.imageSize, cfg.size || THIRD_PARTY_IMAGE_SIZE);
 }
 
 export function removeSavedAgnesKey() {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(KEYS.apiKey);
+  localStorage.removeItem(KEYS.agnesApiKey);
+}
+
+export function removeSavedImageKey() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(KEYS.imageApiKey);
 }

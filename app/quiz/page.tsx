@@ -466,9 +466,8 @@ export default function QuestionBankPage() {
     const content = buildComicContent(question, answer, aiResults[question.id]);
     const body = {
       content,
-      size: "1K",
-      ratio: "16:9",
-      promptVersion: "comic-v9-dense-study-infographic",
+      size: localStorage.getItem("gongkao-image-size") || "1024x1024",
+      promptVersion: "comic-v1-original",
     };
     const historyKey = createHistoryKey("image", {
       scope: "quiz_comic",
