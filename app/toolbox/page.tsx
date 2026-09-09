@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ThreeBlocksTool, ThreeCubeTool, ThreeCutTool } from "@/components/ToolboxThreeTools";
+import { checkSession } from "@/lib/auth";
+import { loadData, saveData } from "@/lib/store";
 import {
   defaultMemoryCards,
   formulaItems,
@@ -56,10 +58,9 @@ const tools: ToolMeta[] = [
 
 const toolById = Object.fromEntries(tools.map((tool) => [tool.id, tool])) as Record<ToolId, ToolMeta>;
 
-const cardStoreKey = "gongkao-toolbox-idiom-cards";
-const progressStoreKey = "gongkao-toolbox-idiom-progress";
-const memoryClearVersionKey = "gongkao-toolbox-idiom-clear-version";
 const memoryClearVersion = "2026-07-03-idiom-card-v2";
+const legacyCardStoreKey = "gongkao-toolbox-idiom-cards";
+const legacyProgressStoreKey = "gongkao-toolbox-idiom-progress";
 
 function randomInt(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -315,9 +316,9 @@ export default function ToolboxPage() {
   const [activeTool, setActiveTool] = useState<ToolId>("speed");
 
   useEffect(() => {
-    if (!localStorage.getItem("gongkao-current-user")) {
-      window.location.href = "/login";
-    }
+    void checkSession().then((valid) => {
+      if (!valid) window.location.href = "/login";
+    });
   }, []);
 
   const visibleTools = tools.filter((tool) => tool.category === activeCategory);
@@ -1527,24 +1528,25 @@ function MemoryCardTool() {
 
   useEffect(() => {
     try {
-      if (localStorage.getItem(memoryClearVersionKey) !== memoryClearVersion) {
-        localStorage.removeItem(cardStoreKey);
-        localStorage.removeItem(progressStoreKey);
-        localStorage.setItem(memoryClearVersionKey, memoryClearVersion);
-        setCards(defaultMemoryCards);
-        setProgress({});
-        return;
+      const data = loadData();
+      let saved = data.toolbox?.version === memoryClearVersion ? data.toolbox.idiomCards : null;
+      let savedProgress = data.toolbox?.version === memoryClearVersion ? data.toolbox.idiomProgress : null;
+      if (!saved?.length && typeof window !== "undefined") {
+        const legacyCards = localStorage.getItem(legacyCardStoreKey);
+        const legacyProgress = localStorage.getItem(legacyProgressStoreKey);
+        saved = legacyCards ? JSON.parse(legacyCards) as MemoryCard[] : null;
+        savedProgress = legacyProgress ? JSON.parse(legacyProgress) as Record<string, "new" | "review" | "mastered"> : null;
       }
-      const saved = localStorage.getItem(cardStoreKey);
-      const savedProgress = localStorage.getItem(progressStoreKey);
-      if (saved) {
-        const savedCards = JSON.parse(saved) as MemoryCard[];
+      if (saved?.length) {
+        const savedCards = saved as MemoryCard[];
         const savedIds = new Set(savedCards.map((card) => card.id));
         const mergedCards = [...defaultMemoryCards.filter((card) => !savedIds.has(card.id)), ...savedCards];
         setCards(mergedCards);
-        localStorage.setItem(cardStoreKey, JSON.stringify(mergedCards));
+        const nextData = loadData();
+        nextData.toolbox = { idiomCards: mergedCards, idiomProgress: savedProgress || {}, version: memoryClearVersion };
+        saveData(nextData);
       }
-      if (savedProgress) setProgress(JSON.parse(savedProgress));
+      if (savedProgress) setProgress(savedProgress);
     } catch {
       setCards(defaultMemoryCards);
     }
@@ -1576,14 +1578,26 @@ function MemoryCardTool() {
 
   const saveCards = (nextCards: MemoryCard[]) => {
     setCards(nextCards);
-    localStorage.setItem(cardStoreKey, JSON.stringify(nextCards));
+    const data = loadData();
+    data.toolbox = {
+      idiomCards: nextCards,
+      idiomProgress: progress,
+      version: memoryClearVersion,
+    };
+    saveData(data);
   };
 
   const mark = (status: "review" | "mastered") => {
     if (!activeCard) return;
     const next = { ...progress, [activeCard.id]: status };
     setProgress(next);
-    localStorage.setItem(progressStoreKey, JSON.stringify(next));
+    const data = loadData();
+    data.toolbox = {
+      idiomCards: cards,
+      idiomProgress: next,
+      version: memoryClearVersion,
+    };
+    saveData(data);
     setFlipped(false);
     if (status === "mastered" && !showMastered) {
       setIndex((value) => Math.min(value, Math.max(filtered.length - 2, 0)));
@@ -1729,8 +1743,10 @@ function MemoryCardTool() {
           <button
             onClick={() => {
               saveCards(defaultMemoryCards);
-              localStorage.removeItem(progressStoreKey);
               setProgress({});
+              const data = loadData();
+              data.toolbox = { idiomCards: defaultMemoryCards, idiomProgress: {}, version: memoryClearVersion };
+              saveData(data);
             }}
             className="ghost-button mt-2 w-full rounded-lg px-4 py-2 text-sm font-semibold"
           >

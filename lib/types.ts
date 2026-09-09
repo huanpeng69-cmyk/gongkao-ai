@@ -108,6 +108,21 @@ export interface StudySession {
   mode: 'quiz' | 'review' | 'knowledge';
 }
 
+export interface MemoryCardData {
+  id: string;
+  category: string;
+  subcategory: string;
+  front: string;
+  back: string;
+  tags: string[];
+}
+
+export interface ToolboxData {
+  idiomCards: MemoryCardData[];
+  idiomProgress: Record<string, "new" | "review" | "mastered">;
+  version: string;
+}
+
 /** 应用完整数据结构 */
 export interface AppData {
   user: UserProfile;
@@ -115,6 +130,7 @@ export interface AppData {
   answeredIds: string[];
   dailyHistory: DailyRecord[];
   studySessions: StudySession[];
+  toolbox?: ToolboxData;
 }
 
 // ==================== 模块配置 ====================

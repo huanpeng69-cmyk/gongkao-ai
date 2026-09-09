@@ -52,10 +52,6 @@ export default function Dashboard() {
   const [reviewPlan, setReviewPlan] = useState<ReturnType<typeof getReviewPlan> | null>(null);
 
   useEffect(() => {
-    if (!localStorage.getItem("gongkao-current-user")) {
-      window.location.href = "/login";
-      return;
-    }
     resetTodayIfNeeded();
     setData(loadData());
     setReviewPlan(getReviewPlan());

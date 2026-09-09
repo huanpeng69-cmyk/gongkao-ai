@@ -34,6 +34,10 @@ npm run dev
 
 打开 `http://localhost:3000`。
 
+## 用户数据存储
+
+账号、密码校验信息、答题记录、错题本和学习统计现在由 Node 服务端保存，登录状态使用 HttpOnly Cookie；浏览器 `localStorage` 仅保留界面偏好和非敏感的用户展示信息。默认数据目录为 `data/server/users.json`，该目录已加入 `.gitignore`，部署到服务器时必须把 `GONGKAO_DATA_DIR` 指向持久化磁盘或挂载卷。GitHub Pages 等纯静态托管没有服务端 API 和持久化数据库，不适合承载登录及用户数据；需要使用 `npm run dev` / `npm start` 的 Node 服务或接入正式数据库后再对外部署。
+
 ## Agnes AI 配置
 
 文字讲解和漫画生图已统一使用 Agnes AI：

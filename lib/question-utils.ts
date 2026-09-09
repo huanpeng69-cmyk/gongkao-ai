@@ -59,8 +59,17 @@ function normalizeImageUrl(url: string) {
   return url;
 }
 
+function isSafeHttpUrl(value: string) {
+  try {
+    const parsed = new URL(value, "https://gongkao.invalid");
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function isSafeImageUrl(url: string) {
-  return /^(https?:\/\/|data:image\/(?:png|jpe?g|gif|webp);base64,)/i.test(url);
+  return isSafeHttpUrl(url) || /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(url);
 }
 
 function isFormulaImage(tag: string, src = getImgSrc(tag)) {
@@ -105,7 +114,7 @@ export function normalizeQuestionHtml(input = "") {
 
     if (name === "a") {
       const href = normalizeImageUrl(getAttribute(tag, "href").trim());
-      if (!/^https?:\/\//i.test(href)) return "<span>";
+      if (!isSafeHttpUrl(href)) return "<span>";
       return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">`;
     }
 

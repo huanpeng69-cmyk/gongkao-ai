@@ -3,18 +3,24 @@
 import { ErrorEntry, ErrorType, Question, UserProfile, DailyRecord, StudySession, AppData, ReviewRating } from "./types";
 import { getCurrentDisplayName, isAuthenticated } from "./auth";
 
-function getStorageKey() {
-  const user = typeof window !== "undefined" ? localStorage.getItem("gongkao-current-user") : null;
-  return `gongkao-data-${user || "default"}`;
-}
+let dataCache: AppData | null = null;
+let dataCacheUser = "";
+let saveQueue = Promise.resolve();
 
 function getUserName() {
   if (typeof window === "undefined") return "学员";
   return getCurrentDisplayName();
 }
 
+export function getLocalDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function getToday(): string {
-  return new Date().toISOString().split("T")[0];
+  return getLocalDateKey();
 }
 
 function getDefaultData(): AppData {
@@ -46,26 +52,46 @@ function getDefaultData(): AppData {
 }
 
 export function loadData(): AppData {
-  if (typeof window === "undefined") return getDefaultData();
-  try {
-    const key = getStorageKey();
-    const raw = localStorage.getItem(key);
-    if (!raw) return getDefaultData();
-    const data = JSON.parse(raw) as AppData;
-    data.user.name = getUserName();
-    // Ensure new fields exist for old data
-    if (!data.dailyHistory) data.dailyHistory = [];
-    if (!data.studySessions) data.studySessions = [];
-    return data;
-  } catch {
-    return getDefaultData();
-  }
+  if (dataCache && dataCacheUser === getCurrentDisplayName()) return dataCache;
+  return getDefaultData();
 }
 
 export function saveData(data: AppData) {
   if (typeof window === "undefined") return;
-  const key = getStorageKey();
-  localStorage.setItem(key, JSON.stringify(data));
+  data.user.name = getUserName();
+  dataCache = data;
+  dataCacheUser = getCurrentDisplayName();
+  const payload = JSON.stringify(data);
+  saveQueue = saveQueue.then(async () => {
+    try {
+      await fetch("/api/data", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: payload,
+      });
+    } catch {
+      // The in-memory cache keeps the current session usable while the server recovers.
+    }
+  });
+}
+
+export async function hydrateData() {
+  if (typeof window === "undefined" || !isAuthenticated()) return loadData();
+  try {
+    const response = await fetch("/api/data", { credentials: "include", cache: "no-store" });
+    if (!response.ok) return loadData();
+    const payload = await response.json();
+    const data = payload.data as AppData | null;
+    dataCache = data || getDefaultData();
+    dataCache.user.name = getUserName();
+    if (!dataCache.dailyHistory) dataCache.dailyHistory = [];
+    if (!dataCache.studySessions) dataCache.studySessions = [];
+    dataCacheUser = getCurrentDisplayName();
+    return dataCache;
+  } catch {
+    return loadData();
+  }
 }
 
 // ==================== 答题记录 ====================
@@ -154,7 +180,9 @@ function updateDailyHistory(data: AppData, today: string, moduleName: string, is
 
 function updateStreak(data: AppData) {
   const today = getToday();
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = getLocalDateKey(yesterdayDate);
 
   const todayRecord = data.dailyHistory.find((r) => r.date === today);
   if (todayRecord && todayRecord.totalDone === 1) {
@@ -224,7 +252,7 @@ export function recordReview(questionId: string, result: boolean | ReviewRating)
       err.interval = newInterval;
       const nextDate = new Date();
       nextDate.setDate(nextDate.getDate() + newInterval);
-      err.nextReviewDate = nextDate.toISOString().split("T")[0];
+      err.nextReviewDate = getLocalDateKey(nextDate);
     }
   }
 
@@ -288,7 +316,7 @@ export function getReviewPlan() {
   for (let i = 1; i <= 7; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = getLocalDateKey(d);
     const count = data.errors.filter((e) => e.nextReviewDate === dateStr && e.loopStatus !== "mastered").length;
     upcoming.push({ date: dateStr, count });
   }
@@ -323,7 +351,7 @@ export function getWeeklyStats() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = getLocalDateKey(d);
     const record = data.dailyHistory.find((r) => r.date === dateStr);
     stats.push({
       date: dateStr,
@@ -371,7 +399,9 @@ export function resetTodayIfNeeded() {
   const todayRecord = data.dailyHistory.find((r) => r.date === today);
   if (!todayRecord) {
     // New day - reset today counters and check streak
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = getLocalDateKey(yesterdayDate);
     const yesterdayRecord = data.dailyHistory.find((r) => r.date === yesterday);
     if (!yesterdayRecord || yesterdayRecord.totalDone === 0) {
       data.user.streak = 0;

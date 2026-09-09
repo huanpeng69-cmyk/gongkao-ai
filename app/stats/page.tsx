@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { loadData, getWeeklyStats, getErrorTypeDistribution, getModuleAccuracy, getErrorStats } from "@/lib/store";
+import { loadData, getLocalDateKey, getWeeklyStats, getErrorTypeDistribution, getModuleAccuracy, getErrorStats } from "@/lib/store";
 
 export default function StatsPage() {
   const [data, setData] = useState<ReturnType<typeof loadData> | null>(null);
@@ -26,7 +26,7 @@ export default function StatsPage() {
   const maxDone = Math.max(...weeklyStats.map((d) => d.done), 1);
 
   // 今日学习时长估算
-  const todaySessions = data.studySessions.filter((s) => s.date === new Date().toISOString().split("T")[0]);
+  const todaySessions = data.studySessions.filter((s) => s.date === getLocalDateKey());
   const totalMinutes = todaySessions.reduce((sum, s) => {
     if (!s.endTime) return sum;
     return sum + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000;
@@ -74,7 +74,7 @@ export default function StatsPage() {
             <div className="flex items-end gap-2" style={{ height: 180 }}>
               {weeklyStats.map((d) => {
                 const dayLabel = `${new Date(d.date).getMonth() + 1}/${new Date(d.date).getDate()}`;
-                const isToday = d.date === new Date().toISOString().split("T")[0];
+                const isToday = d.date === getLocalDateKey();
                 return (
                   <div key={d.date} className="flex-1 flex flex-col items-center gap-1">
                     <div className="text-xs font-semibold" style={{ color: "var(--steel)" }}>{d.done || ""}</div>

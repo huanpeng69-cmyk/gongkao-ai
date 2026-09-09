@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+import { checkSession } from "@/lib/auth";
+import { hydrateData } from "@/lib/store";
 
 function normalizePath(value: string | null) {
   if (!value) return "/";
@@ -23,14 +24,25 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!isAuthenticated()) {
-      const next = currentPath !== "/" ? `?next=${encodeURIComponent(currentPath)}` : "";
-      router.replace(`/login${next}`);
-      setReady(false);
-      return;
+    let cancelled = false;
+
+    async function validateSession() {
+      const authenticated = await checkSession();
+      if (cancelled) return;
+      if (!authenticated) {
+        const next = currentPath !== "/" ? `?next=${encodeURIComponent(currentPath)}` : "";
+        router.replace(`/login${next}`);
+        setReady(false);
+        return;
+      }
+      await hydrateData();
+      if (!cancelled) setReady(true);
     }
 
-    setReady(true);
+    validateSession();
+    return () => {
+      cancelled = true;
+    };
   }, [currentPath, isLoginPage, router]);
 
   if (!isLoginPage && !ready) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getCurrentDisplayName, isAuthenticated, loginUser, logoutUser, registerUser } from "@/lib/auth";
+import { checkSession, getCurrentDisplayName, isAuthenticated, loginUser, logoutUser, registerUser } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +16,11 @@ export default function LoginPage() {
   const [loggedInName, setLoggedInName] = useState("");
 
   useEffect(() => {
-    if (isAuthenticated()) setLoggedInName(getCurrentDisplayName());
+    if (isAuthenticated()) {
+      void checkSession().then((valid) => {
+        if (valid) setLoggedInName(getCurrentDisplayName());
+      });
+    }
   }, []);
 
   const goNext = () => {

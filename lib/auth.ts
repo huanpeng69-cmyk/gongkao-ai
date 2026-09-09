@@ -1,61 +1,55 @@
 "use client";
 
-export type LocalUser = {
+type CachedUser = {
   username: string;
   displayName: string;
-  passwordHash?: string;
-  password?: string;
-  salt?: string;
-  createdAt: string;
+  createdAt?: string;
   lastLoginAt?: string;
 };
 
-type UsersMap = Record<string, LocalUser>;
-
-const USERS_KEY = "gongkao-users";
-const CURRENT_USER_KEY = "gongkao-current-user";
+const CACHED_USER_KEY = "gongkao-user-profile";
+const LEGACY_USERS_KEY = "gongkao-users";
+let cachedUser: CachedUser | null = null;
 
 function normalizeUsername(value: string) {
   return value.trim().toLowerCase();
 }
 
-function getUsers(): UsersMap {
+function readCachedUser() {
+  if (cachedUser || typeof window === "undefined") return cachedUser;
+  try {
+    cachedUser = JSON.parse(localStorage.getItem(CACHED_USER_KEY) || "null") as CachedUser | null;
+  } catch {
+    cachedUser = null;
+  }
+  return cachedUser;
+}
+
+function setCachedUser(user: CachedUser | null) {
+  cachedUser = user;
+  if (typeof window === "undefined") return;
+  if (user) localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+  else localStorage.removeItem(CACHED_USER_KEY);
+}
+
+async function postJson(path: string, body: unknown) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
+}
+
+function readLegacyUsers(): Record<string, { username: string; displayName?: string; passwordHash?: string; password?: string; salt?: string }> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || "{}") as UsersMap;
+    return JSON.parse(localStorage.getItem(LEGACY_USERS_KEY) || "{}") as Record<string, { username: string; displayName?: string; passwordHash?: string; password?: string; salt?: string }>;
   } catch {
     return {};
   }
-}
-
-function saveUsers(users: UsersMap) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-function randomSalt() {
-  const bytes = new Uint8Array(16);
-  const cryptoSource = globalThis.crypto;
-  if (cryptoSource?.getRandomValues) {
-    cryptoSource.getRandomValues(bytes);
-    return Array.from(bytes).map((item) => item.toString(16).padStart(2, "0")).join("");
-  }
-
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = Math.floor(Math.random() * 256);
-  }
-  return Array.from(bytes).map((item) => item.toString(16).padStart(2, "0")).join("");
-}
-
-async function sha256(value: string) {
-  const cryptoSource = globalThis.crypto;
-  if (cryptoSource?.subtle?.digest && typeof TextEncoder !== "undefined") {
-    const data = new TextEncoder().encode(value);
-    const digest = await cryptoSource.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join("");
-  }
-
-  // GitHub Pages may be opened over HTTP before HTTPS is issued; Web Crypto is unavailable there.
-  return fallbackHash(value);
 }
 
 function fallbackHash(value: string) {
@@ -63,7 +57,6 @@ function fallbackHash(value: string) {
   let h2 = 0x01000193;
   let h3 = 0x85ebca6b;
   let h4 = 0xc2b2ae35;
-
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);
     h1 = Math.imul(h1 ^ code, 0x01000193);
@@ -71,107 +64,118 @@ function fallbackHash(value: string) {
     h3 = Math.imul(h3 ^ code, 0xc2b2ae35);
     h4 = Math.imul(h4 ^ code, 0x27d4eb2f);
   }
-
-  return [h1, h2, h3, h4]
-    .map((item) => (item >>> 0).toString(16).padStart(8, "0"))
-    .join("");
+  return [h1, h2, h3, h4].map((item) => (item >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-async function hashPassword(password: string, salt: string) {
-  return sha256(`${salt}:${password}`);
+async function legacyHash(value: string) {
+  if (globalThis.crypto?.subtle && typeof TextEncoder !== "undefined") {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join("");
+  }
+  return fallbackHash(value);
 }
 
-function isValidUsername(value: string) {
-  return /^[\u4e00-\u9fa5a-zA-Z0-9_.@-]{2,24}$/.test(value.trim());
+async function migrateLegacyData(username: string) {
+  if (typeof window === "undefined") return;
+  const key = `gongkao-data-${normalizeUsername(username)}`;
+  const legacyRaw = localStorage.getItem(key);
+  if (!legacyRaw) return;
+
+  try {
+    const existingResponse = await fetch("/api/data", { credentials: "include" });
+    const existing = await existingResponse.json().catch(() => ({}));
+    if (existingResponse.ok && existing.data) return;
+
+    const saveResponse = await fetch("/api/data", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: legacyRaw,
+    });
+    if (saveResponse.ok) localStorage.setItem(`gongkao-data-migrated-${normalizeUsername(username)}`, new Date().toISOString());
+  } catch {
+    // Migration can be retried after the server becomes available.
+  }
 }
 
 export function getCurrentUsername() {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(CURRENT_USER_KEY) || "";
+  return readCachedUser()?.username || "";
 }
 
 export function getCurrentUser() {
-  const username = getCurrentUsername();
-  if (!username) return null;
-  return getUsers()[username] || null;
+  return readCachedUser();
 }
 
 export function getCurrentDisplayName() {
-  const user = getCurrentUser();
-  return user?.displayName || user?.username || getCurrentUsername() || "学员";
+  const user = readCachedUser();
+  return user?.displayName || user?.username || "学员";
 }
 
 export function isAuthenticated() {
-  return Boolean(getCurrentUsername());
+  return Boolean(readCachedUser());
+}
+
+export async function checkSession() {
+  try {
+    const response = await fetch("/api/auth/session", { credentials: "include", cache: "no-store" });
+    if (!response.ok) {
+      setCachedUser(null);
+      return false;
+    }
+    const data = await response.json();
+    setCachedUser(data.user || null);
+    return Boolean(data.user);
+  } catch {
+    setCachedUser(null);
+    return false;
+  }
 }
 
 export async function registerUser(input: { username: string; displayName?: string; password: string; confirmPassword: string }) {
   const username = normalizeUsername(input.username);
   const displayName = (input.displayName || input.username).trim();
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_.@-]{2,24}$/.test(username)) return { ok: false, message: "账号需为2-24位，可用中文、字母、数字、下划线、手机号或邮箱" };
+  if (!displayName || displayName.length > 16) return { ok: false, message: "昵称需为1-16位" };
+  if (input.password.length < 6) return { ok: false, message: "密码至少6位" };
+  if (input.password !== input.confirmPassword) return { ok: false, message: "两次输入的密码不一致" };
 
-  if (!isValidUsername(input.username)) {
-    return { ok: false, message: "账号需为2-24位，可用中文、字母、数字、下划线、手机号或邮箱" };
-  }
-  if (!displayName || displayName.length > 16) {
-    return { ok: false, message: "昵称需为1-16位" };
-  }
-  if (input.password.length < 6) {
-    return { ok: false, message: "密码至少6位" };
-  }
-  if (input.password !== input.confirmPassword) {
-    return { ok: false, message: "两次输入的密码不一致" };
-  }
-
-  const users = getUsers();
-  if (users[username]) {
-    return { ok: false, message: "这个账号已经注册过了" };
-  }
-
-  const salt = randomSalt();
-  users[username] = {
-    username,
-    displayName,
-    salt,
-    passwordHash: await hashPassword(input.password, salt),
-    createdAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
-  };
-  saveUsers(users);
-  localStorage.setItem(CURRENT_USER_KEY, username);
-  return { ok: true, user: users[username] };
+  const { response, data } = await postJson("/api/auth/register", { username, displayName, password: input.password });
+  if (!response.ok) return { ok: false, message: data.message || "注册失败" };
+  setCachedUser(data.user);
+  return { ok: true, user: data.user };
 }
 
 export async function loginUser(input: { username: string; password: string }) {
   const username = normalizeUsername(input.username);
-  const users = getUsers();
-  const user = users[username];
-
-  if (!user) return { ok: false, message: "账号不存在，请先注册" };
-
-  const matchesHash = user.passwordHash && user.salt
-    ? (await hashPassword(input.password, user.salt)) === user.passwordHash
-    : false;
-  const matchesLegacy = user.password ? user.password === input.password : false;
-
-  if (!matchesHash && !matchesLegacy) {
-    return { ok: false, message: "账号或密码不正确" };
+  let { response, data } = await postJson("/api/auth/login", { username, password: input.password });
+  if (response.ok) {
+    setCachedUser(data.user);
+    await migrateLegacyData(username);
+    return { ok: true, user: data.user };
   }
 
-  if (matchesLegacy || !user.passwordHash || !user.salt) {
-    const salt = randomSalt();
-    user.salt = salt;
-    user.passwordHash = await hashPassword(input.password, salt);
-    delete user.password;
+  const legacyUser = readLegacyUsers()[username];
+  if (legacyUser && (legacyUser.password || (legacyUser.passwordHash && legacyUser.salt))) {
+    const legacyHashValue = legacyUser.salt ? await legacyHash(`${legacyUser.salt}:${input.password}`) : "";
+    const matches = legacyUser.password === input.password || legacyHashValue === legacyUser.passwordHash;
+    if (matches) {
+      ({ response, data } = await postJson("/api/auth/register", {
+        username,
+        displayName: legacyUser.displayName || username,
+        password: input.password,
+      }));
+      if (response.ok) {
+        setCachedUser(data.user);
+        await migrateLegacyData(username);
+        return { ok: true, user: data.user, migrated: true };
+      }
+    }
   }
-  user.displayName = user.displayName || user.username;
-  user.lastLoginAt = new Date().toISOString();
-  users[username] = user;
-  saveUsers(users);
-  localStorage.setItem(CURRENT_USER_KEY, username);
-  return { ok: true, user };
+
+  return { ok: false, message: data.message || "账号或密码不正确" };
 }
 
 export function logoutUser() {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(CURRENT_USER_KEY);
+  setCachedUser(null);
+  void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
 }

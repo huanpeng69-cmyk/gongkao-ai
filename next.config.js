@@ -29,17 +29,6 @@ const nextConfig = {
     NEXT_PUBLIC_GONGKAO_IMAGE_SIZE: isMobileExport ? imageSize : '',
   },
   images: { unoptimized: true },
-  async headers() {
-    return [{
-      source: '/api/:path*',
-      headers: [
-        { key: 'Access-Control-Allow-Origin', value: '*' },
-        { key: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
-        { key: 'Access-Control-Allow-Headers', value: 'Content-Type,x-ai-key,x-ai-model,x-image-key,x-image-base,x-image-model,x-image-auth,x-image-size' },
-        { key: 'Cache-Control', value: 'no-store' },
-      ],
-    }];
-  },
 };
 
 module.exports = nextConfig;
