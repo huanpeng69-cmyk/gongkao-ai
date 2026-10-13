@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppData } from "@/lib/types";
 
@@ -30,40 +30,78 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const dataDirectory = process.env.GONGKAO_DATA_DIR || path.join(process.cwd(), "data", "server");
 const databasePath = path.join(dataDirectory, "users.json");
 
-let databasePromise: Promise<Database> | null = null;
+// 同一进程内的写串行化队列，保证「重读磁盘 → 应用变更 → 原子落盘」在同一实例内有序。
 let writeQueue = Promise.resolve();
 
 function emptyDatabase(): Database {
   return { users: {}, sessions: {}, appData: {} };
 }
 
+// 读取磁盘最新库（不做进程级缓存，跨实例写后立即可见）。
+// 只有「文件不存在」（首次运行）才返回空库；文件损坏 / 结构非法 / 其它 I/O 错误一律抛出，
+// 绝不静默当空库——否则配合写前重读会把损坏误判成空库并整库覆盖（F4）。
 async function readDatabase(): Promise<Database> {
+  let raw: string;
   try {
-    const raw = await readFile(databasePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<Database>;
-    return {
-      users: parsed.users || {},
-      sessions: parsed.sessions || {},
-      appData: parsed.appData || {},
-    };
-  } catch {
-    return emptyDatabase();
+    raw = await readFile(databasePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return emptyDatabase();
+    throw error;
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`用户数据库解析失败（文件损坏），已拒绝任何写入以便人工恢复: ${databasePath}`);
+  }
+
+  if (
+    !isPlainObject(parsed) ||
+    (parsed.users !== undefined && !isPlainObject(parsed.users)) ||
+    (parsed.sessions !== undefined && !isPlainObject(parsed.sessions)) ||
+    (parsed.appData !== undefined && !isPlainObject(parsed.appData))
+  ) {
+    throw new Error(`用户数据库结构非法，已拒绝任何写入以便人工恢复: ${databasePath}`);
+  }
+
+  return {
+    users: (parsed.users as Database["users"] | undefined) ?? {},
+    sessions: (parsed.sessions as Database["sessions"] | undefined) ?? {},
+    appData: (parsed.appData as Database["appData"] | undefined) ?? {},
+  };
 }
 
-async function getDatabase() {
-  if (!databasePromise) databasePromise = readDatabase();
-  return databasePromise;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function persistDatabase(database: Database) {
-  writeQueue = writeQueue.then(async () => {
+// read-modify-write：写前重读磁盘最新库，把变更合并到最新状态上再原子落盘。
+// 根治多实例（Vercel 多副本）间因陈旧内存快照整文件覆盖导致的静默丢数据（消融 B/C）。
+// 读取失败时 readDatabase 直接抛出，mutate 不执行、也不落盘，损坏文件原样保留待人工恢复。
+async function withFreshDb<T>(mutate: (database: Database) => T | Promise<T>): Promise<T> {
+  let result!: T;
+  const run = writeQueue.then(async () => {
+    const database = await readDatabase();
+    result = await mutate(database);
     await mkdir(dataDirectory, { recursive: true });
     const tempPath = `${databasePath}.${process.pid}.tmp`;
     await writeFile(tempPath, JSON.stringify(database), { encoding: "utf8", mode: 0o600 });
+    // 覆盖前滚动备份一份，作为最后可恢复兜底（尽力而为，不阻断写入）。
+    try {
+      await copyFile(databasePath, `${databasePath}.bak`);
+    } catch {
+      // 备份失败（如首次运行尚无文件）不影响主流程，主防线是「读取失败即拒绝写入」。
+    }
     await rename(tempPath, databasePath);
   });
-  return writeQueue;
+  // 让队列始终以「已解决」态续接：一次失败不得把后续所有写入永久毒化。
+  writeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  await run;
+  return result;
 }
 
 function normalizeUsername(value: string) {
@@ -96,10 +134,7 @@ export function validateCredentials(input: { username?: string; displayName?: st
 }
 
 export async function createUser(input: { username: string; displayName: string; password: string }) {
-  const database = await getDatabase();
   const username = normalizeUsername(input.username);
-  if (database.users[username]) return { ok: false as const, message: "这个账号已经注册过了" };
-
   const now = new Date().toISOString();
   const salt = randomBytes(16).toString("hex");
   const user: ServerUser = {
@@ -111,60 +146,63 @@ export async function createUser(input: { username: string; displayName: string;
     createdAt: now,
     lastLoginAt: now,
   };
-  database.users[username] = user;
-  await persistDatabase(database);
-  return { ok: true as const, user };
+  return withFreshDb<{ ok: true; user: ServerUser } | { ok: false; message: string }>((db) => {
+    if (db.users[username]) return { ok: false, message: "这个账号已经注册过了" };
+    db.users[username] = user;
+    return { ok: true, user };
+  });
 }
 
 export async function verifyUser(usernameInput: string, password: string) {
-  const database = await getDatabase();
   const username = normalizeUsername(usernameInput);
-  const user = database.users[username];
-  if (!user || !sameSecret(hashPassword(password, user.salt), user.passwordHash)) return null;
-  user.lastLoginAt = new Date().toISOString();
-  await persistDatabase(database);
-  return user;
+  return withFreshDb<ServerUser | null>((db) => {
+    const user = db.users[username];
+    if (!user || !sameSecret(hashPassword(password, user.salt), user.passwordHash)) return null;
+    user.lastLoginAt = new Date().toISOString();
+    return user;
+  });
 }
 
 export async function createSession(userId: string) {
-  const database = await getDatabase();
   const token = randomBytes(32).toString("base64url");
-  database.sessions[hashSessionToken(token)] = {
-    userId,
-    expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
-  };
-  await persistDatabase(database);
-  return { token, maxAge: SESSION_TTL_SECONDS };
+  return withFreshDb<{ token: string; maxAge: number }>((db) => {
+    db.sessions[hashSessionToken(token)] = {
+      userId,
+      expiresAt: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+    };
+    return { token, maxAge: SESSION_TTL_SECONDS };
+  });
 }
 
 export async function getUserBySession(token: string) {
-  const database = await getDatabase();
   const tokenHash = hashSessionToken(token);
-  const session = database.sessions[tokenHash];
-  if (!session) return null;
-  if (session.expiresAt <= Math.floor(Date.now() / 1000)) {
-    delete database.sessions[tokenHash];
-    await persistDatabase(database);
-    return null;
-  }
-  return Object.values(database.users).find((user) => user.id === session.userId) || null;
+  return withFreshDb<ServerUser | null>((db) => {
+    const session = db.sessions[tokenHash];
+    if (!session) return null;
+    if (session.expiresAt <= Math.floor(Date.now() / 1000)) {
+      delete db.sessions[tokenHash];
+      return null;
+    }
+    return Object.values(db.users).find((user) => user.id === session.userId) || null;
+  });
 }
 
 export async function deleteSession(token: string) {
-  const database = await getDatabase();
-  delete database.sessions[hashSessionToken(token)];
-  await persistDatabase(database);
+  await withFreshDb<void>((db) => {
+    delete db.sessions[hashSessionToken(token)];
+  });
 }
 
 export async function getUserData(userId: string): Promise<AppData | null> {
-  const database = await getDatabase();
+  // 纯读也走磁盘最新，保证跨实例写后立即可见。
+  const database = await readDatabase();
   return database.appData[userId] || null;
 }
 
 export async function saveUserData(userId: string, data: AppData) {
-  const database = await getDatabase();
-  database.appData[userId] = data;
-  await persistDatabase(database);
+  await withFreshDb<void>((db) => {
+    db.appData[userId] = data;
+  });
 }
 
 export function publicUser(user: ServerUser) {
