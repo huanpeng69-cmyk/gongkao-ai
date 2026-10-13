@@ -1,0 +1,94 @@
+# 公考私教服务端 —— 单实例常驻容器。
+#
+#   docker compose up -d --build      # 构建并后台启动
+#   docker compose logs -f            # 看日志
+#   docker compose down               # 停止（数据在具名卷里，不丢）
+#
+# 首次部署：cp .env.example .env 并设置 GONGKAO_DOMAIN（真实域名或 localhost），
+#           未设置时 compose 会直接报错退出（Caddy 站点地址不允许为空）。
+#
+# 环境变量：compose 会自动读取同目录下的 .env（该文件已在 .gitignore 中）。
+# 可复制 .env.example 为 .env 后填写密钥。
+#
+# 注意：本文件把用户数据库放在「具名卷 gongkao-data」里，而非仓库的 ./data。
+# 原因是具名卷首次创建时会从镜像继承 /data 的属主(node)，非 root 容器可直接写；
+# 若改用宿主机目录绑定（见文末注释），Linux 上需先 chown 否则会 permission denied。
+
+services:
+  gongkao-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gongkao-ai:latest
+    container_name: gongkao-ai
+    restart: unless-stopped
+    ports:
+      # 仅绑回环：外部访问一律走 Caddy（HTTPS）。
+      # 本机调试仍可直接 curl http://127.0.0.1:3000/...
+      - "127.0.0.1:3000:3000"
+    environment:
+      # 持久化数据目录（容器内路径，对应下方挂载的卷）。
+      GONGKAO_DATA_DIR: /data
+      # 公开服务端绝不允许把 AI 密钥打进前端产物。
+      EMBED_PUBLIC_AI_KEYS: "0"
+      # AI / 图片密钥：从宿主机环境或 .env 注入，缺省为空（不启用对应能力）。
+      AGNES_API_KEY: ${AGNES_API_KEY:-}
+      AI_TEXT_MODEL: ${AI_TEXT_MODEL:-agnes-2.0-flash}
+      AI_TEXT_API_KEY: ${AI_TEXT_API_KEY:-}
+      IMAGE_BASE_URL: ${IMAGE_BASE_URL:-https://wisart.kuaileshifu.com}
+      IMAGE_API_KEY: ${IMAGE_API_KEY:-}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2}
+      IMAGE_AUTH_SCHEME: ${IMAGE_AUTH_SCHEME:-bearer}
+      IMAGE_SIZE: ${IMAGE_SIZE:-1200x675}
+      # 过渡开关：设 "1" 可临时恢复 /api/ai、/api/ai/health、/api/image 的匿名访问。
+      # 默认不设 = 必须登录才能调用（安全默认）。
+      # GONGKAO_ALLOW_ANON_AI: "1"
+    volumes:
+      - gongkao-data:/data
+
+  # —— TLS 反向代理：对外唯一入口（80/443 → HTTPS → gongkao-ai:3000）——
+  # 生产必须走这里：会话 Cookie 在 NODE_ENV=production 下带 Secure 属性，
+  # 明文 HTTP 直连 3000 会表现为「登录成功却始终未登录」。
+  caddy:
+    image: caddy:2-alpine
+    container_name: gongkao-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"    # ACME HTTP-01 校验 + HTTP→HTTPS 跳转
+      - "443:443"  # HTTPS，证书自动申请与续期
+    environment:
+      # 站点域名，必填：未设置时 compose 直接报错退出（fail-loud）。
+      # 生产写真实域名（需解析到本机、公网 80/443 可达 → Let's Encrypt）；
+      # 本地联调写 localhost（Caddy 内部 CA 自签，curl 需加 -k）。
+      GONGKAO_DOMAIN: ${GONGKAO_DOMAIN:?请在 .env 中设置 GONGKAO_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # 证书与 ACME 账户，必须保留，否则重启重签
+      - caddy-config:/config
+    depends_on:
+      gongkao-ai:
+        condition: service_healthy
+volumes:
+  gongkao-data:
+  caddy-data:
+  caddy-config:
+
+# —— 改用宿主机目录（数据可见、便于手工备份）——
+# 把上面的 volumes 换成：
+#
+#   volumes:
+#     - ./data/server:/data
+#
+# 并在 Linux 上先执行（Windows / macOS 的 Docker Desktop 会虚拟化属主，无需此步）：
+#
+#   mkdir -p data/server
+#   sudo chown -R 1000:1000 data/server
+
+# —— 改用宿主机目录（Caddy 证书部分）——
+# 把 caddy 服务的 caddy-data 卷换成：
+#
+#   volumes:
+#     - ./data/caddy:/data
+#
+# 证书目录内含私钥，必须留在版本控制之外（.gitignore 已忽略 /data/caddy/）。
+# 保持具名卷则无此顾虑：证书与 ACME 账户随卷持久化，重建容器不重签。

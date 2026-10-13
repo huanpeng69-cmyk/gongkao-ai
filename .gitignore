@@ -55,6 +55,7 @@ __pycache__/
 /data/*_report.json
 /data/*_unmatched.csv
 /data/missing_explanations.csv
+/data/caddy/
 
 # env files (can opt-in for committing if needed)
 .env*

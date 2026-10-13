@@ -1,0 +1,46 @@
+# Docker 构建上下文排除清单。
+# 目的：镜像只装「运行 Next.js 服务端 + 提供题库」所需的东西；
+#      用户数据与密钥一律在运行时用卷/env 注入，绝不烘进镜像。
+
+# --- 依赖与构建产物（容器内重新生成）---
+node_modules
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+
+# --- 原生壳：体积大且与容器无关 ---
+android
+ios
+
+# --- 版本控制 / CI / 编辑器 ---
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# --- 密钥与环境文件：运行时用 docker env 注入 ---
+.env*
+
+# --- 用户数据库与派生产物：必须运行时挂卷，绝不烘进镜像 ---
+data/server
+data/gkzhenti_cache
+data/*.before-*.json
+data/*.lock
+data/*_report.json
+data/*_unmatched.csv
+data/missing_explanations.csv
+
+# --- 本地分析 / 临时产物 ---
+.harness-scan
+harness-report.html
+calls-*.txt
+prior-summary*.txt
+_session_extract.txt
+*.log
+
+# --- Docker 编排自身（不需要进镜像）---
+docker-compose.yml
+Caddyfile
+.dockerignore
