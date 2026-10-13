@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { AGNES_BASE_URL, AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, buildAgnesChatUrl } from "@/lib/agnes-ai";
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 import { withGongkaoMasterPrompt } from "@/lib/ai-prompts";
+import { requireAuth } from "@/lib/server/require-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -511,6 +512,8 @@ function getEffectiveAiConfig(frontendKey: string, frontendModel: string) {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireAuth();
+  if (denied) return denied;
   try {
     const body = await request.json();
     const {

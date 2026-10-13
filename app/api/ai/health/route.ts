@@ -8,6 +8,7 @@ import {
   buildAgnesModelsUrl,
   type AgnesModality,
 } from "@/lib/agnes-ai";
+import { requireAuth } from "@/lib/server/require-auth";
 
 function classifyStatus(status: number) {
   if (status === 401 || status === 403) return "unauthorized";
@@ -25,6 +26,8 @@ export async function GET(req: Request) {
   if (process.env.MOBILE_EXPORT === '1') {
     return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
   }
+  const denied = await requireAuth();
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const modality: AgnesModality = url.searchParams.get("modality") === "image" ? "image" : "text";

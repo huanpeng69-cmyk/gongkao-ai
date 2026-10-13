@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildOpenAIImageGenerationsUrl } from "@/lib/ai-endpoints";
 import { buildComicPrompt } from "@/lib/comic-prompt";
+import { requireAuth } from "@/lib/server/require-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -69,6 +70,8 @@ function pickImage(data: ImageResponse) {
 }
 
 export async function POST(req: Request) {
+  const denied = await requireAuth();
+  if (denied) return denied;
   const body = (await req.json().catch(() => ({}))) as ImageRequestBody;
   const content = String(body.content || body.prompt || "").trim();
   const size = String(body.size || req.headers.get("x-image-size") || process.env.IMAGE_SIZE || "1200x675");
