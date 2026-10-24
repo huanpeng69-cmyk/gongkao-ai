@@ -17,6 +17,7 @@ import {
 } from "@/lib/ai-history";
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 import { getErrorStats, getReviewPlan, loadData, resetTodayIfNeeded } from "@/lib/store";
+import { MODULES, type ModuleKey } from "@/lib/types";
 import { preloadImage } from "@/lib/image-optimizer";
 import { requestAi } from "@/lib/client-ai";
 import { requestImage } from "@/lib/client-image";
@@ -210,19 +211,22 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {weakPoints.map((wp) => (
-                  <div key={wp.name} className="rounded-lg px-3.5 py-3" style={{ background: "var(--tint-peach)" }}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-semibold" style={{ color: "var(--ink)" }}>{wp.name}</div>
-                        <div className="text-xs mt-0.5" style={{ color: "var(--steel)" }}>做了 {wp.total} 题，正确 {wp.correct} 题</div>
+                {weakPoints.map((wp) => {
+                  const key = (MODULES.find((m) => m.name === wp.name)?.key || "all") as ModuleKey | "all";
+                  return (
+                    <Link key={wp.name} href={`/quiz?module=${key}`} className="rounded-lg px-3.5 py-3 transition-colors hover:opacity-90" style={{ background: "var(--tint-peach)" }}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-semibold" style={{ color: "var(--ink)" }}>{wp.name}</div>
+                          <div className="text-xs mt-0.5" style={{ color: "var(--steel)" }}>做了 {wp.total} 题，正确 {wp.correct} 题 · 点击专练</div>
+                        </div>
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-full text-white" style={{ background: wp.rate < 40 ? "var(--error)" : "var(--brand-orange)" }}>
+                          {wp.rate}%
+                        </span>
                       </div>
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full text-white" style={{ background: wp.rate < 40 ? "var(--error)" : "var(--brand-orange)" }}>
-                        {wp.rate}%
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   createHistoryKey,
@@ -15,7 +16,7 @@ import {
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 import { MODULES, type ModuleKey, type Question } from "@/lib/types";
 import { MOCK_QUESTIONS } from "@/lib/mock-data";
-import { loadData, recordAnswer } from "@/lib/store";
+import { loadData, recordAnswer, updateErrorType } from "@/lib/store";
 import { preloadImages } from "@/lib/image-optimizer";
 import { loadQuestionBank } from "@/lib/question-bank-client";
 import { requestAi } from "@/lib/client-ai";
@@ -254,10 +255,12 @@ function withAiCacheVersion(body: Record<string, unknown>) {
 }
 
 export default function QuestionBankPage() {
+  const searchParams = useSearchParams();
+  const initialModule = (searchParams.get("module") || "all") as ModuleKey | "all";
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [moduleFilter, setModuleFilter] = useState<ModuleKey | "all">("all");
+  const [moduleFilter, setModuleFilter] = useState<ModuleKey | "all">(MODULES.some((m) => m.key === initialModule) ? initialModule : "all");
   const [examFilter, setExamFilter] = useState<"all" | "guokao" | "guangdong" | "shenzhen" | "guangzhou">("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [paperFilter, setPaperFilter] = useState("all");
@@ -436,6 +439,8 @@ export default function QuestionBankPage() {
     const cached = await readHistory<AiResult>(historyKey);
     if (hasUsefulAiResult(cached)) {
       setAiResults((prev) => ({ ...prev, [question.id]: withHistoryHit(cached as AiResult) }));
+      const cachedType = toDisplayText((cached as AiResult).errorType);
+      if (cachedType && cachedType !== "网络错误") updateErrorType(question.id, cachedType);
       return;
     }
 
@@ -445,6 +450,8 @@ export default function QuestionBankPage() {
       setAiResults((prev) => ({ ...prev, [question.id]: data }));
       if (isCacheableAiResult(data)) {
         await writeHistory("ai", historyKey, data, `${question.subModule}错因讲解`);
+        const errType = toDisplayText(data.errorType);
+        if (errType && errType !== "网络错误") updateErrorType(question.id, errType);
       }
     } catch (err) {
       setAiResults((prev) => ({

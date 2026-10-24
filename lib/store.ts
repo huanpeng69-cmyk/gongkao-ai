@@ -35,7 +35,7 @@ function getDefaultData(): AppData {
       todayCorrect: 0,
       errorBook: [],
       knowledgeProfile: {
-        "言语理解": { correct: 0, total: 0, level: "中等" },
+        "言语理解与表达": { correct: 0, total: 0, level: "中等" },
         "判断推理": { correct: 0, total: 0, level: "中等" },
         "资料分析": { correct: 0, total: 0, level: "中等" },
         "数量关系": { correct: 0, total: 0, level: "中等" },
@@ -108,7 +108,7 @@ export function recordAnswer(question: Question, userAnswer: string | string[] |
   }
 
   // Update knowledge profile
-  const kp = data.user.knowledgeProfile[question.module];
+  const kp = data.user.knowledgeProfile[question.module] || (data.user.knowledgeProfile[question.module] = { correct: 0, total: 0, level: "中等" });
   if (kp) {
     kp.total += 1;
     if (isCorrect) kp.correct += 1;
@@ -410,4 +410,21 @@ export function resetTodayIfNeeded() {
     data.user.todayCorrect = 0;
     saveData(data);
   }
+}
+// ==================== 错因回填 ====================
+
+// 把 AI 错因分析识别出的错因写回错题本，让错题本/统计页的「错因分布」真实可信。
+// 仅在题目确实答错（错题本里存在该错题）时写入，且只接受预定义的 6 类错因，避免被垃圾值污染。
+export const KNOWN_ERROR_TYPES: ErrorType[] = [
+  "知识盲区", "概念混淆", "审题失误", "计算/推理错误", "思路偏差", "时间压力",
+];
+
+export function updateErrorType(questionId: string, errorType: string) {
+  if (!KNOWN_ERROR_TYPES.includes(errorType as ErrorType)) return;
+  const data = loadData();
+  const err = data.errors.find((e) => e.questionId === questionId);
+  if (!err) return; // 只有真实答错的题才回填
+  err.errorType = errorType as ErrorType;
+  saveData(data);
+  return data;
 }

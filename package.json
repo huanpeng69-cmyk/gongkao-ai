@@ -9,10 +9,12 @@
     "prepare:mobile": "node scripts/prepare-mobile-assets.js",
     "import:fenbi": "python scripts/import_fenbi_question_bank.py && npm run prepare:mobile",
     "build:mobile": "npm run prepare:mobile && set MOBILE_EXPORT=1&& next build",
-    "android:sync": "npx cap sync android",
+    "android:sync": "npm run build:mobile && npx cap sync android",
+    "ios:sync": "npm run build:mobile && npx cap sync ios",
     "apk:debug": "npm run build:mobile && npx cap sync android && cd android && gradlew assembleDebug",
     "check:site": "powershell -ExecutionPolicy Bypass -File scripts/check-site-health.ps1",
-    "test": "node scripts/verify-store.mjs"
+    "audit:questions": "node scripts/audit-question-bank.js",
+    "test": "node scripts/verify-store.mjs && node scripts/verify-client-store.mjs"
   },
   "dependencies": {
     "next": "^14.2.0",
@@ -24,6 +26,7 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
