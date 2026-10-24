@@ -3,6 +3,8 @@ import { AGNES_BASE_URL, AGNES_PROVIDER, AGNES_TEXT_MODEL, agnesAuthHeaders, bui
 import { toDisplayList, toDisplayText } from "@/lib/ai-display";
 import { withGongkaoMasterPrompt } from "@/lib/ai-prompts";
 import { requireAuth } from "@/lib/server/require-auth";
+import { getAuthenticatedUser } from "@/lib/server/auth";
+import { recordUsage } from "@/lib/server/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -439,6 +441,7 @@ async function callAgnes(
   prompt: string,
   images: string[],
   config: { apiKey?: string; model?: string; baseUrl?: string; maxTokens?: number; temperature?: number },
+  userId: string,
 ) {
   const apiKey = config.apiKey || "";
   const model = config.model || AGNES_TEXT_MODEL;
@@ -467,7 +470,22 @@ async function callAgnes(
     throw new Error(`Agnes AI error [${res.status}]: ${text || res.statusText}`);
   }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
+  const text = data.choices?.[0]?.message?.content || data.choices?.[0]?.message?.reasoning_content || "";
+  // 记录 token 用量。上游不返回 usage 时记 0（生图类或未开启计量的接口）。
+  // 统计失败绝不能影响本次 AI 响应，故单独 try/catch。
+  const usage = (data.usage || {}) as { prompt_tokens?: number; completion_tokens?: number };
+  try {
+    await recordUsage({
+      userId,
+      kind: "text",
+      model,
+      promptTokens: Number(usage.prompt_tokens) || 0,
+      completionTokens: Number(usage.completion_tokens) || 0,
+    });
+  } catch (error) {
+    console.error("recordUsage failed (AI):", error);
+  }
+  return text;
 }
 
 function isImageInputUnsupportedError(error: unknown) {
@@ -514,6 +532,8 @@ function getEffectiveAiConfig(frontendKey: string, frontendModel: string) {
 export async function POST(request: Request) {
   const denied = await requireAuth();
   if (denied) return denied;
+  const auth = await getAuthenticatedUser();
+  const userId = auth?.record.id || "";
   try {
     const body = await request.json();
     const {
@@ -548,11 +568,11 @@ export async function POST(request: Request) {
       const promptText = buildAnalysisPrompt({ question, userAnswer, correctAnswer, explanation, context, module, hasImages: imageInputs.length > 0 });
       let rawText = "";
       try {
-        rawText = await callAgnes(promptText, imageInputs, config);
+        rawText = await callAgnes(promptText, imageInputs, config, userId);
       } catch (error) {
         if (imageInputs.length === 0 || !isImageInputUnsupportedError(error)) throw error;
         try {
-          rawText = await callAgnes(buildAnalysisPrompt({ question, userAnswer, correctAnswer, explanation, context, module, hasImages: false }), [], config);
+          rawText = await callAgnes(buildAnalysisPrompt({ question, userAnswer, correctAnswer, explanation, context, module, hasImages: false }), [], config, userId);
         } catch {
           return NextResponse.json(buildImageUnsupportedResult({ provider: AGNES_PROVIDER, error, isCorrect: userAnswer === correctAnswer, hasTextFallback: false }));
         }
@@ -565,10 +585,10 @@ export async function POST(request: Request) {
       const promptText = buildExplainPrompt({ question, correctAnswer, explanation, context, module });
       let rawText = "";
       try {
-        rawText = await callAgnes(promptText, imageInputs, config);
+        rawText = await callAgnes(promptText, imageInputs, config, userId);
       } catch (error) {
         if (imageInputs.length === 0 || !isImageInputUnsupportedError(error)) throw error;
-        rawText = await callAgnes(promptText, [], config);
+        rawText = await callAgnes(promptText, [], config, userId);
       }
       return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
@@ -576,7 +596,7 @@ export async function POST(request: Request) {
     if (requestMode === "fenbi") {
       if (!question) return NextResponse.json({ error: "Missing question" }, { status: 400 });
       const promptText = buildFenbiQuestionPrompt({ question, userAnswer, correctAnswer, analysis: explanation, material, sourceTitle });
-      const rawText = await callAgnes(promptText, imageInputs, config);
+      const rawText = await callAgnes(promptText, imageInputs, config, userId);
       return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
 
@@ -585,7 +605,7 @@ export async function POST(request: Request) {
       if (!hasUsableAiConfig) return NextResponse.json(localReviewKnowledge({ question, correctAnswer, explanation, module, knowledgePoints, context }));
       const promptText = buildReviewKnowledgePrompt({ question, correctAnswer, explanation, module, knowledgePoints, context });
       try {
-        const rawText = await callAgnes(promptText, imageInputs, config);
+        const rawText = await callAgnes(promptText, imageInputs, config, userId);
         return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
       } catch (error) {
         console.error("Review knowledge Agnes fallback:", error);
@@ -598,7 +618,7 @@ export async function POST(request: Request) {
 
     if (requestMode === "tutor") {
       const promptText = buildHomeTutorPrompt({ prompt, context, imageName });
-      const rawText = await callAgnes(promptText, imageInputs, config);
+      const rawText = await callAgnes(promptText, imageInputs, config, userId);
       return NextResponse.json({ ...normalizeRawAiText(rawText), source: AGNES_PROVIDER });
     }
 

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { buildOpenAIImageGenerationsUrl } from "@/lib/ai-endpoints";
 import { buildComicPrompt } from "@/lib/comic-prompt";
 import { requireAuth } from "@/lib/server/require-auth";
+import { getAuthenticatedUser } from "@/lib/server/auth";
+import { recordUsage } from "@/lib/server/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -72,6 +74,8 @@ function pickImage(data: ImageResponse) {
 export async function POST(req: Request) {
   const denied = await requireAuth();
   if (denied) return denied;
+  const auth = await getAuthenticatedUser();
+  const userId = auth?.record.id || "";
   const body = (await req.json().catch(() => ({}))) as ImageRequestBody;
   const content = String(body.content || body.prompt || "").trim();
   const size = String(body.size || req.headers.get("x-image-size") || process.env.IMAGE_SIZE || "1200x675");
@@ -154,6 +158,13 @@ export async function POST(req: Request) {
         { error: "生图接口未返回图片", detail: "响应中没有找到 data[0].url 或 data[0].b64_json。", raw: data },
         { status: 502 },
       );
+    }
+    // 生图接口不返回 token usage，故按「张数」计一次调用，token 记 0。
+    // 与 /api/ai 一样：统计失败绝不影响生图响应。
+    try {
+      await recordUsage({ userId, kind: "image", model, promptTokens: 0, completionTokens: 0 });
+    } catch (error) {
+      console.error("recordUsage failed (image):", error);
     }
 
     return NextResponse.json({

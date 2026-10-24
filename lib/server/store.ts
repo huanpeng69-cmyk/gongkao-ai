@@ -19,11 +19,23 @@ type ServerSession = {
   userId: string;
   expiresAt: number;
 };
+type UsageRecord = {
+  id: string;
+  userId: string;
+  kind: "text" | "image";
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  // true = 命中客户端缓存，本次没有真实调用上游，token 记 0 但计入「缓存节省」。
+  cached: boolean;
+  createdAt: string;
+};
 
 type Database = {
   users: Record<string, ServerUser>;
   sessions: Record<string, ServerSession>;
   appData: Record<string, AppData>;
+  usage: UsageRecord[];
 };
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -34,7 +46,7 @@ const databasePath = path.join(dataDirectory, "users.json");
 let writeQueue = Promise.resolve();
 
 function emptyDatabase(): Database {
-  return { users: {}, sessions: {}, appData: {} };
+  return { users: {}, sessions: {}, appData: {}, usage: [] };
 }
 
 // 读取磁盘最新库（不做进程级缓存，跨实例写后立即可见）。
@@ -60,7 +72,8 @@ async function readDatabase(): Promise<Database> {
     !isPlainObject(parsed) ||
     (parsed.users !== undefined && !isPlainObject(parsed.users)) ||
     (parsed.sessions !== undefined && !isPlainObject(parsed.sessions)) ||
-    (parsed.appData !== undefined && !isPlainObject(parsed.appData))
+    (parsed.appData !== undefined && !isPlainObject(parsed.appData)) ||
+    (parsed.usage !== undefined && !Array.isArray(parsed.usage))
   ) {
     throw new Error(`用户数据库结构非法，已拒绝任何写入以便人工恢复: ${databasePath}`);
   }
@@ -69,6 +82,7 @@ async function readDatabase(): Promise<Database> {
     users: (parsed.users as Database["users"] | undefined) ?? {},
     sessions: (parsed.sessions as Database["sessions"] | undefined) ?? {},
     appData: (parsed.appData as Database["appData"] | undefined) ?? {},
+    usage: (parsed.usage as Database["usage"] | undefined) ?? [],
   };
 }
 
@@ -203,6 +217,140 @@ export async function saveUserData(userId: string, data: AppData) {
   await withFreshDb<void>((db) => {
     db.appData[userId] = data;
   });
+}
+
+// 单个用户最多保留多少条用量记录。超出后丢弃最旧的，防止 users.json 无限膨胀。
+// 每条约 150 字节，5000 条 ≈ 750KB。
+const USAGE_MAX_PER_USER = 5000;
+
+// 追加一条用量记录。与 store 其余写路径一样走 withFreshDb（读改写 + 原子落盘），
+// 因此同样具备 F4 的失败安全：库损坏时抛错、不落盘、不覆盖。
+// 注意调用方必须自行 try/catch：用量统计绝不能拖垮 AI 主流程。
+export async function recordUsage(input: {
+  userId: string;
+  kind: "text" | "image";
+  model: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  cached?: boolean;
+}) {
+  const record: UsageRecord = {
+    id: randomBytes(12).toString("hex"),
+    userId: input.userId,
+    kind: input.kind,
+    model: input.model.slice(0, 80),
+    promptTokens: Math.max(0, Math.floor(input.promptTokens || 0)),
+    completionTokens: Math.max(0, Math.floor(input.completionTokens || 0)),
+    cached: Boolean(input.cached),
+    createdAt: new Date().toISOString(),
+  };
+  await withFreshDb<void>((db) => {
+    if (!Array.isArray(db.usage)) db.usage = [];
+    db.usage.push(record);
+    if (db.usage.length > USAGE_MAX_PER_USER) {
+      // 只保留每个用户最近的 N 条（整体数组按 createdAt 排序后裁剪，实现更简单）。
+      const byUser = new Map<string, UsageRecord[]>();
+      for (const item of db.usage) {
+        const list = byUser.get(item.userId) || [];
+        list.push(item);
+        byUser.set(item.userId, list);
+      }
+      const keep: UsageRecord[] = [];
+      for (const list of byUser.values()) {
+        keep.push(...list.slice(Math.max(0, list.length - USAGE_MAX_PER_USER)));
+      }
+      keep.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      db.usage = keep;
+    }
+  });
+}
+
+// 聚合某个用户的用量。时间边界按 UTC+8 归日，与 lib/store.ts 的本地日期口径一致。
+export async function getUsageSummary(userId: string) {
+  const database = await readDatabase();
+  const records = (Array.isArray(database.usage) ? database.usage : []).filter((r) => r.userId === userId);
+
+  const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const dayKey = (iso: string) => new Date(new Date(iso).getTime() + TZ_OFFSET_MS).toISOString().slice(0, 10);
+
+  const now = new Date();
+  const today = new Date(now.getTime() + TZ_OFFSET_MS).toISOString().slice(0, 10);
+  const thisMonth = today.slice(0, 7);
+
+  const totals = { prompt: 0, completion: 0, calls: 0, cached: 0 };
+  const todayTotals = { prompt: 0, completion: 0 };
+  const monthTotals = { prompt: 0, completion: 0 };
+  const byKind: Record<string, { prompt: number; completion: number; calls: number }> = {};
+  const byModel: Record<string, { prompt: number; completion: number; calls: number }> = {};
+  const daily: Record<string, { prompt: number; completion: number; calls: number }> = {};
+
+  for (const r of records) {
+    const p = Number(r.promptTokens) || 0;
+    const c = Number(r.completionTokens) || 0;
+    totals.prompt += p;
+    totals.completion += c;
+    totals.calls += 1;
+    if (r.cached) totals.cached += 1;
+
+    const d = dayKey(r.createdAt);
+    if (d === today) {
+      todayTotals.prompt += p;
+      todayTotals.completion += c;
+    }
+    if (d.slice(0, 7) === thisMonth) {
+      monthTotals.prompt += p;
+      monthTotals.completion += c;
+    }
+
+    const k = r.kind === "image" ? "image" : "text";
+    byKind[k] = byKind[k] || { prompt: 0, completion: 0, calls: 0 };
+    byKind[k].prompt += p;
+    byKind[k].completion += c;
+    byKind[k].calls += 1;
+
+    const model = String(r.model || "unknown");
+    byModel[model] = byModel[model] || { prompt: 0, completion: 0, calls: 0 };
+    byModel[model].prompt += p;
+    byModel[model].completion += c;
+    byModel[model].calls += 1;
+
+    daily[d] = daily[d] || { prompt: 0, completion: 0, calls: 0 };
+    daily[d].prompt += p;
+    daily[d].completion += c;
+    daily[d].calls += 1;
+  }
+
+  // 近 14 天（含今天）的连续序列，缺的日子补 0，保证前端图表不会断档。
+  const series: Array<{ date: string; prompt: number; completion: number; calls: number }> = [];
+  for (let i = 13; i >= 0; i -= 1) {
+    const d = new Date(now.getTime() + TZ_OFFSET_MS - i * 86400000).toISOString().slice(0, 10);
+    const item = daily[d] || { prompt: 0, completion: 0, calls: 0 };
+    series.push({ date: d, prompt: item.prompt, completion: item.completion, calls: item.calls });
+  }
+
+  const recent = records
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 50)
+    .map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      model: r.model,
+      promptTokens: r.promptTokens,
+      completionTokens: r.completionTokens,
+      cached: Boolean(r.cached),
+      createdAt: r.createdAt,
+    }));
+
+  return {
+    today: todayTotals,
+    thisMonth: monthTotals,
+    totals,
+    byKind,
+    byModel,
+    series,
+    recent,
+  };
 }
 
 export function publicUser(user: ServerUser) {

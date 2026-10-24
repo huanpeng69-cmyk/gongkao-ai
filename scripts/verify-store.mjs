@@ -61,6 +61,7 @@ function loadStore(dataDir) {
 const dbFile = (dir) => path.join(dir, "users.json");
 const readRaw = (f) => fs.readFileSync(f, "utf8");
 const userKeys = (dir) => Object.keys(JSON.parse(readRaw(dbFile(dir))).users || {}).sort();
+const sum2 = (b) => (b ? b.prompt + b.completion : 0);
 
 let pass = 0;
 let fail = 0;
@@ -148,6 +149,47 @@ async function main() {
     const sB = loadStore(dirB);
     const eB = await throws(() => sB.createUser({ username: "qq", displayName: "Q", password: "secret1" }));
     check("F4 users 字段类型非法时写入被拒", eB !== null);
+  }
+
+  // --- U1：usage 记录可写、可聚合，且不影响其它顶层数据 ---
+  {
+    const dir = makeDataDir();
+    const store = loadStore(dir);
+    const u = await store.createUser({ username: "tester", displayName: "Tester", password: "secret1" });
+    const uid = u.ok ? u.user.id : "";
+    await store.recordUsage({ userId: uid, kind: "text", model: "m1", promptTokens: 100, completionTokens: 50 });
+    await store.recordUsage({ userId: uid, kind: "text", model: "m1", promptTokens: 200, completionTokens: 80 });
+    await store.recordUsage({ userId: uid, kind: "image", model: "img-1" });
+    const summary = await store.getUsageSummary(uid);
+    check("U1 usage 累计正确（输入 300 / 输出 130）", summary.totals.prompt === 300 && summary.totals.completion === 130);
+    check("U1 调用次数与缓存计数正确", summary.totals.calls === 3 && summary.totals.cached === 0);
+    check("U1 按能力分开统计", sum2(summary.byKind.text) === 430 && summary.byKind.image.calls === 1);
+    check("U1 按模型统计", summary.byModel.m1.calls === 2 && summary.byModel["img-1"].calls === 1);
+    check("U1 近 14 天序列长度固定且含今日", summary.series.length === 14);
+    check("U1 最近列表按时间倒序且最多 50 条", summary.recent.length === 3 && summary.recent[0].kind === "image");
+    const onDisk = JSON.parse(readRaw(dbFile(dir)));
+    check("U1 usage 已落库且未破坏 users/appData", onDisk.users.tester && onDisk.usage.length === 3);
+  }
+
+  // --- U2：别的用户看不到彼此的 usage ---
+  {
+    const dir = makeDataDir();
+    const store = loadStore(dir);
+    const a = await store.createUser({ username: "ua", displayName: "UA", password: "secret1" });
+    const b = await store.createUser({ username: "ub", displayName: "UB", password: "secret1" });
+    await store.recordUsage({ userId: a.ok ? a.user.id : "", kind: "text", model: "m", promptTokens: 10, completionTokens: 5 });
+    const summaryB = await store.getUsageSummary(b.ok ? b.user.id : "");
+    check("U2 用户 B 读不到用户 A 的用量", summaryB.totals.calls === 0 && summaryB.recent.length === 0);
+  }
+
+  // --- U3：库损坏时 recordUsage 必须拒绝写入而不是静默记空 ---
+  {
+    const dir = makeDataDir();
+    fs.writeFileSync(dbFile(dir), "{ 坏数据 ");
+    const store = loadStore(dir);
+    const err = await throws(() => store.recordUsage({ userId: "x", kind: "text", model: "m", promptTokens: 1, completionTokens: 1 }));
+    check("U3 损坏库时记录用量被拒（fail-closed）", err !== null);
+    check("U3 损坏文件未被覆盖", readRaw(dbFile(dir)) === "{ 坏数据 ");
   }
 }
 
