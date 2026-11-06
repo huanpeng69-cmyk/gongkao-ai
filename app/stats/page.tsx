@@ -25,12 +25,13 @@ export default function StatsPage() {
   const loopRate = totalErrors > 0 ? Math.round((loopStats.mastered / totalErrors) * 100) : 0;
   const maxDone = Math.max(...weeklyStats.map((d) => d.done), 1);
 
-  // 今日学习时长估算
-  const todaySessions = data.studySessions.filter((s) => s.date === getLocalDateKey());
-  const totalMinutes = todaySessions.reduce((sum, s) => {
-    if (!s.endTime) return sum;
-    return sum + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000;
-  }, 0);
+  // 今日学习时长：优先用刷题过程中写入的 dailyHistory.timeSpentMinutes，为 0 时回落到 studySessions 估算。
+  const todayKey = getLocalDateKey();
+  const todayRecordedMinutes = data.dailyHistory.find((record) => record.date === todayKey)?.timeSpentMinutes || 0;
+  const todaySessionMinutes = data.studySessions
+    .filter((s) => s.date === todayKey)
+    .reduce((sum, s) => (s.endTime ? sum + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 60000 : sum), 0);
+  const totalMinutes = todayRecordedMinutes > 0 ? todayRecordedMinutes : todaySessionMinutes;
 
   // 常见错因颜色
   const errorColors: Record<string, { color: string; bg: string }> = {
@@ -99,6 +100,7 @@ export default function StatsPage() {
               <SummaryItem label="连续学习天数" value={`${data.user.streak}天`} color="var(--brand-orange)" />
               <SummaryItem label="错题闭环完成率" value={`${loopRate}%`} color="var(--primary)" sub={`${totalErrors}道错题中${loopStats.mastered}道已掌握`} />
               <SummaryItem label="今日刷题" value={`${data.user.todayDone} 题`} />
+              <SummaryItem label="今日学习时长" value={totalMinutes > 0 ? `${Math.round(totalMinutes)} 分钟` : "-"} color="var(--link-blue)" />
               <SummaryItem label="今日正确率" value={data.user.todayDone > 0 ? `${Math.round((data.user.todayCorrect / data.user.todayDone) * 100)}%` : "-"} />
             </div>
           </div>
