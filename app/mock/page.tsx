@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { loadQuestionBank } from "@/lib/question-bank-client";
-import { loadData, recordAnswer } from "@/lib/store";
+import { addStudyMinutes, recordAnswer } from "@/lib/store";
 import type { Question } from "@/lib/types";
 import {
   answerToKeys,
@@ -63,10 +63,10 @@ export default function MockExamPage() {
   const [selectedPaper, setSelectedPaper] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(90);
   const [examQuestions, setExamQuestions] = useState<MockQuestion[]>([]);
-  const [answeredIds, setAnsweredIds] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [submitted, setSubmitted] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(90 * 60);
+  const [examTotalSeconds, setExamTotalSeconds] = useState(90 * 60);
   const [activeId, setActiveId] = useState("");
 
   useEffect(() => {
@@ -78,11 +78,9 @@ export default function MockExamPage() {
         const data = await loadQuestionBank<MockQuestion>(10000);
         if (!mounted) return;
         setQuestions(data.questions || []);
-        setAnsweredIds(loadData().answeredIds || []);
         if (data.error) setLoadError(data.error);
       } catch (error) {
         if (!mounted) return;
-        setAnsweredIds(loadData().answeredIds || []);
         setLoadError(error instanceof Error ? error.message : String(error));
       } finally {
         if (mounted) setLoading(false);
@@ -94,10 +92,11 @@ export default function MockExamPage() {
     };
   }, []);
 
-  const availableQuestions = useMemo(() => {
-    const answeredSet = new Set(answeredIds);
-    return questions.filter((question) => question.type !== "essay" && !answeredSet.has(question.id));
-  }, [questions, answeredIds]);
+  // 整卷出题：不再剔除已做过的题，否则同一套卷二次模考会被切碎。
+  const availableQuestions = useMemo(
+    () => questions.filter((question) => question.type !== "essay"),
+    [questions],
+  );
 
   const papers = useMemo(() => {
     const map = new Map<string, number>();
@@ -106,7 +105,6 @@ export default function MockExamPage() {
       map.set(title, (map.get(title) || 0) + 1);
     });
     return Array.from(map.entries())
-      .filter(([, count]) => count >= 20)
       .sort((a, b) => parseYear(b[0]) - parseYear(a[0]) || b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hans"));
   }, [availableQuestions]);
 
@@ -123,6 +121,28 @@ export default function MockExamPage() {
     : 0;
   const accuracy = submitted && examQuestions.length > 0 ? Math.round((correctCount / examQuestions.length) * 100) : 0;
 
+  const elapsedSeconds = Math.max(0, examTotalSeconds - remainingSeconds);
+
+  const moduleReport = useMemo(() => {
+    if (!submitted) return [];
+    const map = new Map<string, { total: number; correct: number }>();
+    examQuestions.forEach((question) => {
+      const key = question.module || "未分类";
+      const row = map.get(key) || { total: 0, correct: 0 };
+      row.total += 1;
+      if (isCorrectAnswer(question, answers[question.id])) row.correct += 1;
+      map.set(key, row);
+    });
+    return Array.from(map.entries())
+      .map(([module, row]) => ({
+        module,
+        total: row.total,
+        correct: row.correct,
+        rate: row.total ? Math.round((row.correct / row.total) * 100) : 0,
+      }))
+      // 正确率低的模块排前面：交卷后先看最该补的短板。
+      .sort((a, b) => a.rate - b.rate || b.total - a.total);
+  }, [submitted, examQuestions, answers]);
   useEffect(() => {
     if (!examQuestions.length || submitted) return;
     if (remainingSeconds <= 0) {
@@ -135,10 +155,13 @@ export default function MockExamPage() {
 
   const startExam = () => {
     const nextQuestions = availableQuestions.filter((question) => (question.sourceTitle || question.source) === selectedPaper);
+    const totalSeconds = Math.max(1, durationMinutes) * 60;
     setExamQuestions(nextQuestions);
     setAnswers({});
     setSubmitted(false);
-    setRemainingSeconds(Math.max(1, durationMinutes) * 60);
+    setRemainingSeconds(totalSeconds);
+    // 快照本卷总时长：交卷后时长输入框会解锁，实时读 durationMinutes 会让用时漂移。
+    setExamTotalSeconds(totalSeconds);
     setActiveId(nextQuestions[0]?.id || "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -146,14 +169,15 @@ export default function MockExamPage() {
   const submitExam = () => {
     if (!examQuestions.length || submitted) return;
     setSubmitted(true);
-    let nextData = loadData();
     examQuestions.forEach((question) => {
       const value = answers[question.id];
       if (value !== undefined && value !== "") {
-        nextData = recordAnswer(question, value, isCorrectAnswer(question, value), question.moduleKey);
+        recordAnswer(question, value, isCorrectAnswer(question, value), question.moduleKey);
       }
     });
-    setAnsweredIds(nextData.answeredIds || []);
+    // 整卷用时一次性记入当天学习时长（模考不走单题计时）。
+    const spentMinutes = Math.max(0, examTotalSeconds - remainingSeconds) / 60;
+    if (spentMinutes > 0) addStudyMinutes(spentMinutes);
   };
 
   const selectAnswer = (question: MockQuestion, value: AnswerValue) => {
@@ -181,8 +205,8 @@ export default function MockExamPage() {
       <div className="page-shell">
         <section className="bank-toolbar p-4 mb-4" style={{ background: "rgba(253,255,251,0.92)", border: "1px solid var(--hairline)" }}>
           <div className="mock-toolbar-stats grid grid-cols-4 gap-3 mb-4">
-            <Stat label="未做试卷" value={loading ? "..." : papers.length} />
-            <Stat label="本卷未做" value={selectedPaperCount || "-"} />
+            <Stat label="可选试卷" value={loading ? "..." : papers.length} />
+            <Stat label="本卷题量" value={selectedPaperCount || "-"} />
             <Stat label="已答题数" value={examQuestions.length ? `${answeredCount}/${examQuestions.length}` : "-"} />
             <Stat label={submitted ? "本次得分" : "剩余时间"} value={submitted ? `${correctCount}/${examQuestions.length}` : examQuestions.length ? formatTime(remainingSeconds) : "-"} />
           </div>
@@ -222,10 +246,40 @@ export default function MockExamPage() {
             </div>
           )}
           {submitted && (
-            <div className="mt-3 rounded-lg px-4 py-3 flex items-center gap-4" style={{ background: "var(--tint-mint)", color: "var(--brand-green)" }}>
-              <span className="text-sm font-bold">交卷完成</span>
-              <span className="text-sm">正确 {correctCount} 题，正确率 {accuracy}%</span>
-              <span className="text-xs" style={{ color: "var(--slate)" }}>未作答按错题计入本次得分，已作答题目写入学习记录。</span>
+            <div className="mt-3 rounded-lg px-4 py-3" style={{ background: "var(--tint-mint)", color: "var(--brand-green)" }}>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="text-sm font-bold">交卷完成</span>
+                <span className="text-sm">总题数 {examQuestions.length}</span>
+                <span className="text-sm">已答 {answeredCount}</span>
+                <span className="text-sm">正确 {correctCount}</span>
+                <span className="text-sm">正确率 {accuracy}%</span>
+                <span className="text-sm">实际用时 {formatTime(elapsedSeconds)}</span>
+              </div>
+              {moduleReport.length > 0 && (
+                <div className="mt-3 rounded-md overflow-hidden" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr style={{ color: "var(--steel)" }}>
+                        <th className="text-left px-3 py-2 font-semibold">模块</th>
+                        <th className="text-right px-3 py-2 font-semibold">题数</th>
+                        <th className="text-right px-3 py-2 font-semibold">正确</th>
+                        <th className="text-right px-3 py-2 font-semibold">正确率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {moduleReport.map((row) => (
+                        <tr key={row.module} style={{ borderTop: "1px solid var(--hairline-soft)", color: "var(--charcoal)" }}>
+                          <td className="text-left px-3 py-2">{row.module}</td>
+                          <td className="text-right px-3 py-2 tabular-nums">{row.total}</td>
+                          <td className="text-right px-3 py-2 tabular-nums">{row.correct}</td>
+                          <td className="text-right px-3 py-2 tabular-nums">{row.rate}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="mt-2 text-xs" style={{ color: "var(--slate)" }}>未作答按错题计入本次得分，已作答题目与本次用时写入学习记录。</div>
             </div>
           )}
         </section>
