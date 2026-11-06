@@ -96,24 +96,35 @@ export async function hydrateData() {
 
 // ==================== 答题记录 ====================
 
-export function recordAnswer(question: Question, userAnswer: string | string[] | boolean, isCorrect: boolean, moduleKey?: string) {
+export function recordAnswer(
+  question: Question,
+  userAnswer: string | string[] | boolean,
+  isCorrect: boolean,
+  moduleKey?: string,
+  minutesSpent = 0,
+) {
   const data = loadData();
   const today = getToday();
+  // 首刷口径：重复作答只补记耗时与错题本，不再累加题数/正确数，避免二刷污染正确率。
+  const isFirstAttempt = !data.answeredIds.includes(question.id);
+  const minutes = Number.isFinite(minutesSpent) && minutesSpent > 0 ? Math.round(minutesSpent * 10) / 10 : 0;
 
-  data.user.totalQuestions += 1;
-  data.user.todayDone += 1;
-  if (isCorrect) {
-    data.user.totalCorrect += 1;
-    data.user.todayCorrect += 1;
-  }
+  if (isFirstAttempt) {
+    data.user.totalQuestions += 1;
+    data.user.todayDone += 1;
+    if (isCorrect) {
+      data.user.totalCorrect += 1;
+      data.user.todayCorrect += 1;
+    }
 
-  // Update knowledge profile
-  const kp = data.user.knowledgeProfile[question.module] || (data.user.knowledgeProfile[question.module] = { correct: 0, total: 0, level: "中等" });
-  if (kp) {
-    kp.total += 1;
-    if (isCorrect) kp.correct += 1;
-    const rate = kp.total > 0 ? kp.correct / kp.total : 0;
-    kp.level = rate >= 0.8 ? "优秀" : rate >= 0.6 ? "中等" : rate >= 0.4 ? "薄弱" : "严重薄弱";
+    // Update knowledge profile
+    const kp = data.user.knowledgeProfile[question.module] || (data.user.knowledgeProfile[question.module] = { correct: 0, total: 0, level: "中等" });
+    if (kp) {
+      kp.total += 1;
+      if (isCorrect) kp.correct += 1;
+      const rate = kp.total > 0 ? kp.correct / kp.total : 0;
+      kp.level = rate >= 0.8 ? "优秀" : rate >= 0.6 ? "中等" : rate >= 0.4 ? "薄弱" : "严重薄弱";
+    }
   }
 
   // Add to error book if wrong
@@ -137,12 +148,12 @@ export function recordAnswer(question: Question, userAnswer: string | string[] |
     }
   }
 
-  if (!data.answeredIds.includes(question.id)) {
+  if (isFirstAttempt) {
     data.answeredIds.push(question.id);
   }
 
   // Update daily history
-  updateDailyHistory(data, today, question.module, isCorrect, moduleKey);
+  updateDailyHistory(data, today, question.module, isCorrect, moduleKey, isFirstAttempt, minutes);
 
   // Update streak
   updateStreak(data);
@@ -151,7 +162,7 @@ export function recordAnswer(question: Question, userAnswer: string | string[] |
   return data;
 }
 
-function updateDailyHistory(data: AppData, today: string, moduleName: string, isCorrect: boolean, moduleKey?: string) {
+function ensureDailyRecord(data: AppData, today: string): DailyRecord {
   let record = data.dailyHistory.find((r) => r.date === today);
   if (!record) {
     record = {
@@ -166,6 +177,25 @@ function updateDailyHistory(data: AppData, today: string, moduleName: string, is
     };
     data.dailyHistory.push(record);
   }
+  return record;
+}
+
+function updateDailyHistory(
+  data: AppData,
+  today: string,
+  moduleName: string,
+  isCorrect: boolean,
+  moduleKey: string | undefined,
+  isFirstAttempt: boolean,
+  minutesSpent: number,
+) {
+  const record = ensureDailyRecord(data, today);
+
+  // 耗时每次都记（二刷也要计时），题数/正确数只在首刷累加。
+  if (minutesSpent > 0) {
+    record.timeSpentMinutes = Math.round((record.timeSpentMinutes + minutesSpent) * 10) / 10;
+  }
+  if (!isFirstAttempt) return;
 
   record.totalDone += 1;
   if (isCorrect) record.totalCorrect += 1;
@@ -176,6 +206,16 @@ function updateDailyHistory(data: AppData, today: string, moduleName: string, is
   }
   record.moduleBreakdown[mk].done += 1;
   if (isCorrect) record.moduleBreakdown[mk].correct += 1;
+}
+
+/** 批量累加当天学习时长（整卷模考交卷时一次性记入）。 */
+export function addStudyMinutes(minutes: number) {
+  const data = loadData();
+  if (!Number.isFinite(minutes) || minutes <= 0) return data;
+  const record = ensureDailyRecord(data, getToday());
+  record.timeSpentMinutes = Math.round((record.timeSpentMinutes + minutes) * 10) / 10;
+  saveData(data);
+  return data;
 }
 
 function updateStreak(data: AppData) {
@@ -329,7 +369,7 @@ export function getReviewPlan() {
     mastered: data.errors.filter((e) => e.loopStatus === "mastered").length,
     reviewing: data.errors.filter((e) => e.loopStatus === "reviewing").length,
     upcoming,
-    reviewQueue: dueToday.slice(0, 20), // 最多返回20条待复习
+    reviewQueue: dueToday, // 全部到期错题（此前截断到 20 条会让逾期堆积后永远看不到后面的题）
   };
 }
 

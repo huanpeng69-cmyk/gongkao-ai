@@ -3,6 +3,7 @@
 // 覆盖本次 P0 改动：
 //   ③ knowledgeProfile 键与真实题库 module 对齐（言语理解与表达），且作答时自愈创建缺失键；
 //   ② updateErrorType 把 AI 错因写回错题本，且只接受 6 类已知错因、只针对真实错题。
+//   首刷幂等（重复作答不累加题数）、按题记时、addStudyMinutes 整卷结算、reviewQueue 不截断。
 //
 // 用项目自带 typescript 把源码转译为 CJS 后加载，stub 掉 auth / types / window 边界。
 // 每个用例块都重新编译一份独立 store 模块，避免模块级 dataCache 串味（这是此前一次假红的根因）。
@@ -131,6 +132,79 @@ const check = (name, cond) => {
   store.updateErrorType("不存在的题", "审题失误");
   const after = store.loadData();
   check("② 非真实错题不被写入", !after.errors.some((e) => e.questionId === "不存在的题"));
+}
+
+// --- 首刷幂等：同一题重复作答不再累加题数/正确数（避免二刷污染正确率） ---
+{
+  const store = makeStore();
+  const base = store.loadData();
+  store.recordAnswer(QUESTION, "B", false); // 首刷答错
+  store.recordAnswer(QUESTION, "A", true); // 二刷答对
+  const after = store.loadData();
+  const kp = after.user.knowledgeProfile["言语理解与表达"];
+  check("首刷幂等：totalQuestions 只累加 1 次", after.user.totalQuestions === base.user.totalQuestions + 1);
+  check("首刷幂等：todayDone 只累加 1 次", after.user.todayDone === base.user.todayDone + 1);
+  check("首刷幂等：模块 total 只累加 1 次且仍记首刷为错", !!kp && kp.total === 1 && kp.correct === 0);
+  check(
+    "首刷幂等：answeredIds 记录该题且不重复",
+    after.answeredIds.filter((id) => id === "yanyu-001").length === 1,
+  );
+}
+
+// --- 耗时：重复作答只累加 timeSpentMinutes，不累加题数 ---
+{
+  const store = makeStore();
+  const today = store.getLocalDateKey();
+  const base = store.loadData();
+  const baseMinutes = (base.dailyHistory.find((r) => r.date === today) || {}).timeSpentMinutes || 0;
+  store.recordAnswer(QUESTION, "B", false, undefined, 0.5);
+  store.recordAnswer(QUESTION, "B", false, undefined, 1.25);
+  const after = store.loadData();
+  const rec = after.dailyHistory.find((r) => r.date === today) || {};
+  // store 约定按 1 位小数入账，0.5 + 1.25 = 1.75 会进位为 1.8
+  check("耗时：二刷仍累加 timeSpentMinutes（0.5 + 1.25 → 1.8）", Math.abs((rec.timeSpentMinutes || 0) - baseMinutes - 1.8) < 1e-9);
+  check("耗时：二刷不重复累加当天题数", rec.totalDone === ((base.dailyHistory.find((r) => r.date === today) || {}).totalDone || 0) + 1);
+}
+
+// --- addStudyMinutes：整卷模考一次性结算当天时长，非法输入不写入 ---
+{
+  const store = makeStore();
+  const today = store.getLocalDateKey();
+  const baseMinutes = (store.loadData().dailyHistory.find((r) => r.date === today) || {}).timeSpentMinutes || 0;
+  store.addStudyMinutes(12.5);
+  const afterFirst = (store.loadData().dailyHistory.find((r) => r.date === today) || {}).timeSpentMinutes || 0;
+  check("addStudyMinutes：累加当天时长", Math.abs(afterFirst - baseMinutes - 12.5) < 1e-9);
+  store.addStudyMinutes(0);
+  store.addStudyMinutes(-5);
+  store.addStudyMinutes(Number.NaN);
+  const afterBad = (store.loadData().dailyHistory.find((r) => r.date === today) || {}).timeSpentMinutes || 0;
+  check("addStudyMinutes：非正数/NaN 不写入", Math.abs(afterBad - afterFirst) < 1e-9);
+}
+
+// --- reviewQueue 不截断：超过 20 条到期错题也要全部返回（此前 slice(0,20)） ---
+{
+  const store = makeStore();
+  const today = store.getLocalDateKey();
+  const data = store.loadData();
+  for (let i = 0; i < 25; i++) {
+    data.errors.push({
+      questionId: `due-${i}`,
+      question: { ...QUESTION, id: `due-${i}` },
+      userAnswer: "B",
+      errorType: "思路偏差",
+      errorDate: today,
+      loopStatus: "pending",
+      loopCount: 0,
+      reviewHistory: [{ date: today, correct: false }],
+      nextReviewDate: today,
+      easeFactor: 2.5,
+      interval: 0,
+    });
+  }
+  store.saveData(data);
+  const plan = store.getReviewPlan();
+  check("reviewQueue：25 条到期错题全部返回（不截断到 20）", plan.reviewQueue.length === 25);
+  check("reviewQueue：dueToday 计数与实际队列一致", plan.dueToday === 25);
 }
 
 console.log(`\n客户端 store 回归测试：${pass}/${pass + fail} 通过`);
