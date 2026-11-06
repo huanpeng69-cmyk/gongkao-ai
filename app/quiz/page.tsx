@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import {
@@ -257,6 +257,11 @@ function withAiCacheVersion(body: Record<string, unknown>) {
 export default function QuestionBankPage() {
   const searchParams = useSearchParams();
   const initialModule = (searchParams.get("module") || "all") as ModuleKey | "all";
+  // ?ids=a,b,c 来自复习页的「按错因重练」，直接锁定一份题集。
+  const initialIdFilter = useMemo(
+    () => (searchParams.get("ids") || "").split(",").map((id) => id.trim()).filter(Boolean),
+    [searchParams],
+  );
   const [questions, setQuestions] = useState<PracticeQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -264,6 +269,8 @@ export default function QuestionBankPage() {
   const [examFilter, setExamFilter] = useState<"all" | "guokao" | "guangdong" | "shenzhen" | "guangzhou">("all");
   const [yearFilter, setYearFilter] = useState("all");
   const [paperFilter, setPaperFilter] = useState("all");
+  const [idFilter, setIdFilter] = useState<string[]>(initialIdFilter);
+  const [practiceView, setPracticeView] = useState<"undone" | "done" | "all">(initialIdFilter.length > 0 ? "all" : "undone");
   const [keyword, setKeyword] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [answeredIds, setAnsweredIds] = useState<string[]>([]);
@@ -274,6 +281,8 @@ export default function QuestionBankPage() {
   const [comicResults, setComicResults] = useState<Record<string, ComicResult>>({});
   const [comicLoading, setComicLoading] = useState<Record<string, boolean>>({});
   const [directoryCollapsed, setDirectoryCollapsed] = useState(false);
+  // 每题计时起点（毫秒）：进入练习项时打点，提交时结算并清掉。
+  const questionStartRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     let mounted = true;
@@ -322,8 +331,16 @@ export default function QuestionBankPage() {
   const filteredQuestions = useMemo(() => {
     const key = keyword.trim().toLowerCase();
     const answeredSet = new Set(answeredIds);
+    const idSet = new Set(idFilter);
     return questions.filter((question) => {
-      if (answeredSet.has(question.id)) return false;
+      // 指定题集优先：来自复习页的「按错因重练」，不再按已做/未做过滤。
+      if (idSet.size > 0) {
+        if (!idSet.has(question.id)) return false;
+      } else if (practiceView === "undone" && answeredSet.has(question.id)) {
+        return false;
+      } else if (practiceView === "done" && !answeredSet.has(question.id)) {
+        return false;
+      }
       if (moduleFilter !== "all" && question.moduleKey !== moduleFilter) return false;
       if (examFilter !== "all" && getExamType(question.sourceTitle) !== examFilter) return false;
       if (yearFilter !== "all" && parseYear(question.sourceTitle) !== Number(yearFilter)) return false;
@@ -339,7 +356,7 @@ export default function QuestionBankPage() {
       ].join(" ").toLowerCase();
       return text.includes(key);
     });
-  }, [questions, answeredIds, moduleFilter, examFilter, yearFilter, paperFilter, keyword]);
+  }, [questions, answeredIds, idFilter, practiceView, moduleFilter, examFilter, yearFilter, paperFilter, keyword]);
 
   const practiceItems = useMemo(() => buildPracticeItems(filteredQuestions), [filteredQuestions]);
   const selectedItem = practiceItems[selectedIndex] || practiceItems[0];
@@ -347,7 +364,7 @@ export default function QuestionBankPage() {
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [moduleFilter, examFilter, yearFilter, paperFilter, keyword]);
+  }, [moduleFilter, examFilter, yearFilter, paperFilter, keyword, practiceView, idFilter]);
 
   useEffect(() => {
     if (practiceItems.length === 0) {
@@ -360,6 +377,12 @@ export default function QuestionBankPage() {
   // 预加载当前题目的图片
   useEffect(() => {
     if (!selectedItem) return;
+
+    // 进入练习项时给该题（组）打计时起点；同一题只打一次，切回来不重置。
+    const now = Date.now();
+    getPracticeItemQuestionIds(selectedItem).forEach((id) => {
+      if (!questionStartRef.current.has(id)) questionStartRef.current.set(id, now);
+    });
 
     const imageSources: string[] = [];
     if (selectedItem.type === "single") {
@@ -388,11 +411,13 @@ export default function QuestionBankPage() {
     const correct = isCorrectAnswer(question, value);
 
     setSubmitted((prev) => ({ ...prev, [question.id]: true }));
-    recordAnswer(question, value, correct);
 
-    if (!correct) {
-      requestAiAnalysis(question, value);
-    }
+    // 单题耗时：进入该题到点提交之间的分钟数，结算后清掉起点。
+    const startedAt = questionStartRef.current.get(question.id);
+    questionStartRef.current.delete(question.id);
+    const minutesSpent = startedAt ? (Date.now() - startedAt) / 60000 : 0;
+    // AI 错因讲解改为按需触发，提交时不再自动消耗一次接口调用。
+    recordAnswer(question, value, correct, undefined, minutesSpent);
   };
 
   const resetAnswer = (question: PracticeQuestion) => {
@@ -549,7 +574,7 @@ export default function QuestionBankPage() {
         <section className="bank-toolbar p-4 mb-4" style={{ background: "rgba(253,255,251,0.92)", border: "1px solid var(--hairline)" }}>
           <div className="grid grid-cols-4 gap-3 mb-4">
             <StatCard label="题库题量" value={loading ? "..." : questions.length} />
-            <StatCard label="未做筛选" value={filteredQuestions.length} />
+            <StatCard label="当前题量" value={filteredQuestions.length} />
             <StatCard label="材料题组" value={materialGroupCount} />
             <StatCard label="试卷套数" value={papers.length || "-"} />
           </div>
@@ -603,6 +628,27 @@ export default function QuestionBankPage() {
             ))}
           </div>
 
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <span className="text-xs font-semibold mr-1" style={{ color: "var(--steel)" }}>练习范围</span>
+            <FilterButton active={practiceView === "undone"} onClick={() => setPracticeView("undone")}>未做</FilterButton>
+            <FilterButton active={practiceView === "done"} onClick={() => setPracticeView("done")}>已做</FilterButton>
+            <FilterButton active={practiceView === "all"} onClick={() => setPracticeView("all")}>全部</FilterButton>
+          </div>
+
+          {idFilter.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md px-3 py-2" style={{ background: "var(--tint-sky)", color: "var(--link-blue)" }}>
+              <span className="text-xs font-semibold">正在按指定题集练习 {idFilter.length} 题</span>
+              <button
+                onClick={() => {
+                  setIdFilter([]);
+                  setPracticeView("undone");
+                }}
+                className="ghost-button px-2 py-1 text-xs font-medium rounded-lg"
+              >
+                清除题集
+              </button>
+            </div>
+          )}
           {loadError && (
             <div className="mt-3 text-xs rounded-md px-3 py-2" style={{ background: "var(--tint-peach)", color: "var(--brand-orange)" }}>
               {loadError}
@@ -682,6 +728,7 @@ export default function QuestionBankPage() {
                 onReset={resetAnswer}
                 onToggleMulti={(question, key) => selectAnswer(question, mergeMultiAnswer(answers[question.id], key))}
                 onGenerateComic={requestComicImage}
+                onRequestAi={(question) => requestAiAnalysis(question, answers[question.id])}
                 onNext={goNext}
               />
             )}
@@ -700,6 +747,7 @@ export default function QuestionBankPage() {
                 onSubmit={() => submitAnswer(selectedItem.question)}
                 onReset={() => resetAnswer(selectedItem.question)}
                 onGenerateComic={() => requestComicImage(selectedItem.question)}
+                onRequestAi={() => requestAiAnalysis(selectedItem.question, answers[selectedItem.question.id])}
                 onNext={goNext}
               />
             )}
@@ -722,6 +770,7 @@ function MaterialGroupPractice({
   onToggleMulti,
   onSubmit,
   onReset,
+  onRequestAi,
   onGenerateComic,
   onNext,
 }: {
@@ -736,6 +785,7 @@ function MaterialGroupPractice({
   onToggleMulti: (question: PracticeQuestion, key: string) => void;
   onSubmit: (question: PracticeQuestion) => void;
   onReset: (question: PracticeQuestion) => void;
+  onRequestAi: (question: PracticeQuestion) => void;
   onGenerateComic: (question: PracticeQuestion) => void;
   onNext: () => void;
 }) {
@@ -797,6 +847,7 @@ function MaterialGroupPractice({
                 onToggleMulti={(key) => onToggleMulti(question, key)}
                 onSubmit={() => onSubmit(question)}
                 onReset={() => onReset(question)}
+                onRequestAi={() => onRequestAi(question)}
                 onGenerateComic={() => onGenerateComic(question)}
               />
             ))}
@@ -825,6 +876,7 @@ function SingleQuestionPractice({
   onToggleMulti,
   onSubmit,
   onReset,
+  onRequestAi,
   onGenerateComic,
   onNext,
 }: {
@@ -839,6 +891,7 @@ function SingleQuestionPractice({
   onToggleMulti: (key: string) => void;
   onSubmit: () => void;
   onReset: () => void;
+  onRequestAi: () => void;
   onGenerateComic: () => void;
   onNext: () => void;
 }) {
@@ -857,6 +910,7 @@ function SingleQuestionPractice({
         onToggleMulti={onToggleMulti}
         onSubmit={onSubmit}
         onReset={onReset}
+        onRequestAi={onRequestAi}
         onGenerateComic={onGenerateComic}
       />
       <button
@@ -883,6 +937,7 @@ function QuestionBlock({
   onToggleMulti,
   onSubmit,
   onReset,
+  onRequestAi,
   onGenerateComic,
 }: {
   question: PracticeQuestion;
@@ -898,6 +953,7 @@ function QuestionBlock({
   onToggleMulti: (key: string) => void;
   onSubmit: () => void;
   onReset: () => void;
+  onRequestAi: () => void;
   onGenerateComic: () => void;
 }) {
   const correct = submitted && isCorrectAnswer(question, answer);
@@ -975,6 +1031,19 @@ function QuestionBlock({
               <span className="text-sm font-semibold" style={{ color: correct ? "var(--brand-green)" : "var(--error)" }}>
                 {correct ? "回答正确" : `答错了：你的答案 ${userAnswerText}，正确答案 ${correctAnswerText}`}
               </span>
+              {!correct && (
+                <button
+                  onClick={onRequestAi}
+                  disabled={aiLoading}
+                  className="ghost-button px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-50"
+                  style={{ color: "var(--brand-orange)" }}
+                >
+                  {aiLoading ? "AI 分析中..." : aiResult ? "重新分析错因" : "AI 讲错因"}
+                </button>
+              )}
+              {!correct && (
+                <span className="text-xs" style={{ color: "var(--steel)" }}>AI 讲解按需生成，每次会消耗一次接口调用</span>
+              )}
             </>
           )}
         </div>
