@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   createHistoryKey,
@@ -94,6 +94,9 @@ function getClientImageSources(question: Parameters<typeof getQuestionImageSourc
   });
 }
 
+// plan 未加载时的稳定空数组，避免 useMemo 依赖每次渲染都变化。
+const NO_QUEUE: ErrorEntry[] = [];
+
 export default function ReviewPage() {
   const [plan, setPlan] = useState<ReturnType<typeof getReviewPlan> | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
@@ -102,15 +105,33 @@ export default function ReviewPage() {
   const [userAnswer, setUserAnswer] = useState<string | null>(null);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [knowledgeResult, setKnowledgeResult] = useState<KnowledgeResult | null>(null);
+  const [errorTypeFilter, setErrorTypeFilter] = useState("all");
 
   useEffect(() => {
     setPlan(getReviewPlan());
   }, []);
 
+  const queue = plan ? plan.reviewQueue : NO_QUEUE;
+
+  const errorTypeFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+    queue.forEach((entry) => {
+      const key = entry.errorType || "未标注";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hans"));
+  }, [queue]);
+
+  const visibleQueue = useMemo(
+    () => (errorTypeFilter === "all" ? queue : queue.filter((entry) => (entry.errorType || "未标注") === errorTypeFilter)),
+    [queue, errorTypeFilter],
+  );
+
   if (!plan) return <div className="p-8 text-sm" style={{ color: "var(--steel)" }}>加载中...</div>;
 
-  const queue = plan.reviewQueue;
-  const current: ErrorEntry | undefined = queue[currentIdx];
+  const current: ErrorEntry | undefined = visibleQueue[currentIdx];
+  // 「按此重练」把题号带进题库页；压到 120 题以内避免 URL 过长。
+  const practiceIds = visibleQueue.slice(0, 120).map((entry) => entry.questionId);
 
   const handleReview = (rating: ReviewRating) => {
     if (!current) return;
@@ -119,7 +140,7 @@ export default function ReviewPage() {
     setShowAnswer(false);
     setUserAnswer(null);
     setKnowledgeResult(null);
-    if (currentIdx < queue.length - 1) {
+    if (currentIdx < visibleQueue.length - 1) {
       setCurrentIdx(currentIdx + 1);
     } else {
       setReviewMode(false);
@@ -197,7 +218,7 @@ export default function ReviewPage() {
         <div className="topbar sticky top-0 z-40 flex items-center px-8 h-14">
           <button onClick={() => { setReviewMode(false); setCurrentIdx(0); }} className="ghost-button text-sm font-medium mr-4 px-3 py-1.5 rounded-lg">← 退出</button>
           <span className="text-sm font-bold" style={{ color: "var(--ink)" }}>错题复习</span>
-          <span className="text-xs ml-3" style={{ color: "var(--steel)" }}>{currentIdx + 1} / {queue.length}</span>
+          <span className="text-xs ml-3" style={{ color: "var(--steel)" }}>{currentIdx + 1} / {visibleQueue.length}</span>
           <div className="ml-auto flex gap-2">
             <div className="px-2 py-1 rounded text-xs" style={{ background: current.loopStatus === "pending" ? "var(--brand-orange)" : "var(--link-blue)" }}>
               {current.loopStatus === "pending" ? "待复习" : `${current.loopCount}/3`}
@@ -208,7 +229,7 @@ export default function ReviewPage() {
         <div className="p-8 max-w-[800px]">
           <div className="mb-6">
             <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--hairline-soft)" }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${((currentIdx + 1) / queue.length) * 100}%`, background: "var(--primary)" }} />
+              <div className="h-full rounded-full transition-all" style={{ width: `${((currentIdx + 1) / Math.max(visibleQueue.length, 1)) * 100}%`, background: "var(--primary)" }} />
             </div>
           </div>
 
@@ -427,26 +448,73 @@ export default function ReviewPage() {
             <div className="text-xs" style={{ color: "var(--steel)" }}>已掌握</div>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs font-semibold mr-1" style={{ color: "var(--steel)" }}>错因筛选</span>
+          <button
+            onClick={() => { setErrorTypeFilter("all"); setCurrentIdx(0); }}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg"
+            style={{
+              background: errorTypeFilter === "all" ? "var(--primary)" : "var(--surface)",
+              color: errorTypeFilter === "all" ? "white" : "var(--slate)",
+              border: "1px solid var(--hairline)",
+            }}
+          >
+            全部 {queue.length}
+          </button>
+          {errorTypeFacets.map(([type, count]) => (
+            <button
+              key={type}
+              onClick={() => { setErrorTypeFilter(type); setCurrentIdx(0); }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg"
+              style={{
+                background: errorTypeFilter === type ? "var(--primary)" : "var(--surface)",
+                color: errorTypeFilter === type ? "white" : "var(--slate)",
+                border: "1px solid var(--hairline)",
+              }}
+            >
+              {type} {count}
+            </button>
+          ))}
+        </div>
 
-        {queue.length > 0 && (
+        {visibleQueue.length > 0 && (
           <div className="accent-band p-6 mb-6">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-lg font-bold mb-1" style={{ color: "var(--ink)" }}>今日有 {queue.length} 道错题待复习</div>
+                <div className="text-lg font-bold mb-1" style={{ color: "var(--ink)" }}>今日有 {visibleQueue.length} 道错题待复习</div>
                 <div className="text-sm" style={{ color: "var(--slate)" }}>开始复习后，系统会逐题展示，答对3次自动标记为已掌握</div>
               </div>
-              <button onClick={() => setReviewMode(true)}
-                className="primary-button px-6 py-3 text-sm font-semibold rounded-xl shrink-0">开始复习</button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Link
+                  href={`/quiz?ids=${practiceIds.join(",")}`}
+                  className="ghost-button px-4 py-3 text-sm font-medium rounded-xl"
+                  style={{ color: "var(--primary)", border: "1px solid var(--hairline)" }}
+                >
+                  {visibleQueue.length > practiceIds.length ? `重练前 ${practiceIds.length} 题` : `重练这 ${practiceIds.length} 题`}
+                </Link>
+                <button onClick={() => setReviewMode(true)}
+                  className="primary-button px-6 py-3 text-sm font-semibold rounded-xl shrink-0">开始复习</button>
+              </div>
             </div>
           </div>
         )}
 
-        {queue.length === 0 && (
+        {visibleQueue.length === 0 && (
           <div className="rounded-xl p-8 mb-6 text-center" style={{ background: "var(--canvas)", border: "1px solid var(--hairline)" }}>
             <div className="mx-auto mb-3 w-12 h-12 rounded-full flex items-center justify-center text-base font-bold" style={{ background: "var(--tint-mint)", color: "var(--primary)" }}>✓</div>
-            <div className="text-base font-semibold" style={{ color: "var(--ink)" }}>今日无需复习</div>
-            <div className="text-sm mt-1" style={{ color: "var(--steel)" }}>继续刷题吧，系统会在合适的时间安排复习</div>
-            <Link href="/quiz" className="inline-block mt-4 px-5 py-2.5 text-sm font-medium rounded-lg text-white" style={{ background: "var(--primary)" }}>去刷题</Link>
+            <div className="text-base font-semibold" style={{ color: "var(--ink)" }}>{queue.length > 0 ? "该错因下没有到期错题" : "今日无需复习"}</div>
+            <div className="text-sm mt-1" style={{ color: "var(--steel)" }}>{queue.length > 0 ? "换一个错因筛选，或查看全部到期错题" : "继续刷题吧，系统会在合适的时间安排复习"}</div>
+            {errorTypeFilter === "all" ? (
+              <Link href="/quiz" className="inline-block mt-4 px-5 py-2.5 text-sm font-medium rounded-lg text-white" style={{ background: "var(--primary)" }}>去刷题</Link>
+            ) : (
+              <button
+                onClick={() => { setErrorTypeFilter("all"); setCurrentIdx(0); }}
+                className="inline-block mt-4 px-5 py-2.5 text-sm font-medium rounded-lg text-white"
+                style={{ background: "var(--primary)" }}
+              >
+                查看全部到期错题
+              </button>
+            )}
           </div>
         )}
 
