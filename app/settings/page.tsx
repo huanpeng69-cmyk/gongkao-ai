@@ -124,7 +124,7 @@ export default function SettingsPage() {
     <div className="min-h-screen" style={{ background: "var(--surface)" }}>
       <header className="h-14 flex items-center px-4 md:px-7 border-b" style={{ background: "var(--canvas)", borderColor: "var(--hairline)" }}>
         <Link href="/" className="font-bold" style={{ color: "var(--primary)" }}>公考AI私教</Link>
-        <div className="ml-auto flex items-center gap-3 text-sm" style={{ color: "var(--steel)" }}><span>{username}</span><button onClick={handleLogout}>退出</button></div>
+        <div className="ml-auto flex items-center gap-3 text-sm" style={{ color: "var(--steel)" }}><Link href="/usage">Token 用量</Link><span>{username}</span><button onClick={handleLogout}>退出</button></div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-7">

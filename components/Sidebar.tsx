@@ -13,7 +13,6 @@ const navItems = [
   { href: "/toolbox", label: "备考百宝箱", icon: "▣", tone: "var(--brand-orange)" },
   { href: "/review", label: "复习计划", icon: "↻", tone: "var(--link-blue)" },
   { href: "/stats", label: "数据统计", icon: "%", tone: "var(--brand-green)" },
-  { href: "/usage", label: "Token 用量", icon: "◈", tone: "var(--link-blue)" },
 ];
 
 export default function Sidebar() {

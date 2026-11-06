@@ -18,9 +18,7 @@ const mobileTabs = [
   { href: "/", label: "\u5b66\u4e60", icon: "\u2302" },
   { href: "/quiz", label: "\u9898\u5e93", icon: "\u2630" },
   { href: "/mock", label: "\u6a21\u8003", icon: "\u270e", center: true },
-  { href: "/toolbox", label: "\u5b9d\u7bb1", icon: "\u25a3" },
   { href: "/review", label: "\u8ba1\u5212", icon: "\u25a1" },
-  { href: "/usage", label: "Token", icon: "\u25c8" },
   { href: "/settings", label: "\u6211\u7684", icon: "\u25cb" },
 ];
 
