@@ -196,6 +196,75 @@ export default function ReviewPage() {
     }
   };
 
+  const downloadCurrentNote = () => {
+    if (!current) return;
+
+    const q = current.question;
+    const lines = [
+      `# ${q.subModule || q.module} 错题`,
+      "",
+      `- 模块：${q.module}`,
+      `- 知识点：${(q.knowledgePoints || []).join("、") || "未标注"}`,
+      `- 来源：${[q.sourceTitle, q.year, q.source].filter(Boolean).join(" / ") || "未标注"}`,
+      `- 错题日期：${current.errorDate || "未记录"}`,
+      "",
+      "## 题目",
+      "",
+    ];
+    const material = stripHtml(getQuestionMaterialHtml(q));
+    const questionText = getQuestionText(q);
+    if (material) lines.push("### 材料", "", material, "");
+    lines.push(questionText || "（题目内容为空）", "");
+
+    if (q.options?.length) {
+      lines.push("### 选项", "", ...q.options.map((option) => `- ${option.key}. ${getOptionDisplayText(option) || "（见题图）"}`), "");
+    }
+
+    lines.push(
+      "## 作答结果",
+      "",
+      `- 我的答案：${getAnswerContent(q, current.userAnswer) || answerToText(current.userAnswer) || "未记录"}`,
+      `- 正确答案：${getCorrectAnswerContent(q) || getCorrectText(q) || "未记录"}`,
+      `- 错因分类：${current.errorType || "未标注"}`,
+    );
+
+    const explanation = getDisplayExplanation(q);
+    if (explanation) lines.push("", "## 原解析", "", explanation);
+
+    if (knowledgeResult && hasKnowledgeContent(knowledgeResult)) {
+      lines.push("", `## ${toDisplayText(knowledgeResult.title) || "AI 错因讲解"}`, "");
+      const errorType = toDisplayText(knowledgeResult.errorType);
+      const analysis = toDisplayText(knowledgeResult.analysis || knowledgeResult.answerSummary);
+      const keyPoints = toDisplayList(knowledgeResult.keyPoints);
+      const method = toDisplayText(knowledgeResult.method);
+      const mnemonic = toDisplayText(knowledgeResult.mnemonic);
+      const example = toDisplayText(knowledgeResult.example);
+      const suggestion = toDisplayText(knowledgeResult.suggestion);
+      const bihangTip = toDisplayText(knowledgeResult.bihangTip);
+      if (errorType) lines.push(`- AI 判断错因：${errorType}`, "");
+      if (analysis) lines.push(analysis, "");
+      if (keyPoints.length) lines.push("### 要点归纳", "", ...keyPoints.map((point) => `- ${point}`), "");
+      if (method) lines.push(`### 解题方法\n\n${method}`, "");
+      if (mnemonic) lines.push(`### 记忆口诀\n\n${mnemonic}`, "");
+      if (example) lines.push(`### 例题\n\n${example}`, "");
+      if (bihangTip) lines.push(`### 易错提醒\n\n${bihangTip}`, "");
+      if (suggestion) lines.push(`### 复习建议\n\n${suggestion}`, "");
+    }
+
+    const fileName = `${q.subModule || q.module}-${current.questionId}`
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .trim();
+    const blob = new Blob([lines.join("\n").trim() + "\n"], { type: "text/markdown;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${fileName || "错题"}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  };
+
   if (reviewMode && current) {
     const q = current.question;
     const materialHtml = getQuestionMaterialHtml(q);
@@ -341,6 +410,13 @@ export default function ReviewPage() {
                   <div className="fenbi-explanation-body question-material" dangerouslySetInnerHTML={{ __html: originalExplanationHtml }} />
                 </section>
               )}
+              <button
+                onClick={downloadCurrentNote}
+                className="mb-4 px-3 py-2 text-sm font-medium rounded-lg border"
+                style={{ borderColor: "var(--hairline-strong)", color: "var(--primary)", background: "var(--surface)" }}
+              >
+                导出 Markdown 笔记
+              </button>
               <div className="rounded-lg p-4 mb-4" style={{ background: "var(--surface)", border: "1px solid var(--hairline)" }}>
                 <div className="flex items-center gap-3">
                   <div>
