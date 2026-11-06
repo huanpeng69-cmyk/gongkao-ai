@@ -1,6 +1,6 @@
 # 公考私教
 
-公考刷题、模考、错题复习、百宝箱工具和 AI 讲解一体化学习应用。项目基于 Next.js，移动端可通过 Capacitor 打包为 Android APK。
+公考刷题、模考、错题复习、百宝箱工具和 AI 讲解一体化学习应用。基于 Next.js（App Router）+ TypeScript + Tailwind，账号与学习数据由 Node 服务端持久化，移动端可通过 Capacitor 打包为 Android / iOS 应用。
 
 ## 界面预览
 
@@ -18,11 +18,29 @@
 
 ## 功能
 
-- 真题题库：支持搜索、考试/年份/试卷筛选、材料题组练习。
-- 真题模考：按整套试卷计时训练。
-- 错题复习：按复习计划回看错题，并可生成错因讲解。
-- 备考百宝箱：资料分析、空间重构、截面图、三视图、记忆卡片等工具。
-- AI 设置：文本讲解和生图接口均从系统设置或运行环境读取，不在仓库中内置 API Key。
+- **学习主页**：今日计划、累计题量与正确率、今日学习时长、AI 私教入口。
+- **真题题库**（`/quiz`）：搜索、考试 / 年份 / 试卷筛选、材料题组练习；「练习范围」分段（全部 / 未做 / 错题 / 薄弱专项）；`/quiz?ids=` 载入精确题集用于定向重练（上限 120 题）；单题计时并计入当日学习时长；AI 讲错因按需触发，不预跑模型。
+- **真题模考**（`/mock`）：按整套试卷出题（不剔除旧作答）、整卷计时、答题卡、交卷评分，并给出整卷与分模块报告；交卷时按实际用时一次性结算当日学习时长。
+- **错题复习**（`/review`）：按复习计划回看错题、按错因筛选、AI 错因讲解与分类、「按此重练」把题号回填到题库页、导出 Markdown 笔记。
+- **学习统计**（`/stats`）：日 / 周题量与正确率、今日学习时长。
+- **Token 用量看板**（`/usage`）：按日汇总 AI 调用与输入 / 输出 Token。
+- **备考百宝箱**（`/toolbox`）：资料分析、空间重构、截面图、三视图、记忆卡片等工具。
+- **账号体系**（`/login`）：注册 / 登录，会话使用 HttpOnly Cookie，用户数据由服务端保存。
+- **AI 设置**：文本讲解与生图接口均从系统设置或运行环境读取，仓库中不内置 API Key。
+
+## 技术栈与目录
+
+Next.js 14 App Router、React 18、TypeScript、Tailwind CSS、Three.js、Capacitor 8；测试为零依赖的 Node 脚本。
+
+```text
+app/           页面路由与 /api（ai、image、usage、auth、data、gkzhenti）
+components/    共享组件（侧栏、底部导航、AuthGate 等）
+lib/           客户端 store、类型定义、AI 客户端、题库解析
+lib/server/    服务端 JSON 存储与鉴权
+scripts/       题库导入 / 审计、移动端资源准备、回归测试
+docs/          部署文档、决策记录、界面截图
+data/          题库与运行数据（data/server/ 已被忽略）
+```
 
 ## 本地运行
 
@@ -34,9 +52,21 @@ npm run dev
 
 打开 `http://localhost:3000`。
 
+## 测试与 CI
+
+```bash
+npm test              # 服务端 store 23 条 + 客户端 store 18 条断言
+npx tsc --noEmit      # 类型检查
+```
+
+- `scripts/verify-store.mjs`：服务端 JSON 存储的并发写入、会话、用量记录与复习队列。
+- `scripts/verify-client-store.mjs`：客户端 store 的首刷幂等、按题计时、学习时长入账、错题队列不截断。
+
+`.github/workflows/ci.yml` 在 push 到 `main` 和所有 Pull Request 上执行类型检查与上述测试；`deploy-pages.yml` 负责静态站发布，`site-health.yml` 每 30 分钟检查线上站点与 DNS。
+
 ## 用户数据存储
 
-账号、密码校验信息、答题记录、错题本和学习统计现在由 Node 服务端保存，登录状态使用 HttpOnly Cookie；浏览器 `localStorage` 仅保留界面偏好和非敏感的用户展示信息。默认数据目录为 `data/server/users.json`，该目录已加入 `.gitignore`，部署到服务器时必须把 `GONGKAO_DATA_DIR` 指向持久化磁盘或挂载卷。GitHub Pages 等纯静态托管没有服务端 API 和持久化数据库，不适合承载登录及用户数据；需要使用 `npm run dev` / `npm start` 的 Node 服务或接入正式数据库后再对外部署。
+账号、密码校验信息、答题记录、错题本和学习统计由 Node 服务端保存，登录状态使用 HttpOnly Cookie；浏览器 `localStorage` 仅保留界面偏好和非敏感的展示信息。默认数据目录为 `data/server/users.json`，该目录已加入 `.gitignore`，部署到服务器时必须把 `GONGKAO_DATA_DIR` 指向持久化磁盘或挂载卷。GitHub Pages 等纯静态托管没有服务端 API 和持久化数据库，不适合承载登录及用户数据；需要使用 `npm run dev` / `npm start` 的 Node 服务，或接入正式数据库后再对外部署。
 
 ## Agnes AI 配置
 
@@ -71,9 +101,9 @@ npm run build
 npm run build:mobile
 ```
 
-## Android APK
+## Android / iOS 打包
 
-准备 Android SDK 和 JDK 21 后执行：
+Android 需准备 Android SDK 和 JDK 21：
 
 ```bash
 npm run build:mobile
@@ -82,11 +112,22 @@ cd android
 gradlew assembleDebug
 ```
 
-生成文件：
+生成文件：`android/app/build/outputs/apk/debug/app-debug.apk`。iOS 侧使用 `npm run ios:sync` 同步后用 Xcode 运行。
 
-```text
-android/app/build/outputs/apk/debug/app-debug.apk
+`capacitor.config.ts` 读取 `CAP_SERVER_URL`：留空时 WebView 加载本地 `out/` 静态包；填入服务端域名后，App 内的 `/api/*` 请求自动指向该域名，登录与数据持久化才会生效。
+
+## Docker 自托管（含 HTTPS）
+
+JSON 文件存储只在单实例常驻进程下成立，推荐用仓库自带的 compose + Caddy 部署：
+
+```bash
+cp .env.example .env                          # 填写 AI / 图片密钥
+echo 'GONGKAO_DOMAIN=app.example.com' >> .env # 必填；本地联调写 localhost
+docker compose up -d --build
+docker compose logs -f
 ```
+
+访问 `https://<GONGKAO_DOMAIN>`。Caddy 独占 80/443 并自动申请 / 续期 TLS 证书，应用端口只绑 `127.0.0.1:3000` 不对外暴露。生产环境 Cookie 带 `Secure`，因此必须通过 HTTPS 访问，否则会出现「登录成功但页面仍显示未登录」。证书与 ACME 账号存放在具名卷 `gongkao-ai_caddy-data`，重建容器不会重签。完整说明见 [`docs/deploy-docker.md`](docs/deploy-docker.md)。
 
 ## GitHub / Vercel 部署
 
@@ -116,6 +157,14 @@ npm run check:site
 ```
 
 如果提示 `DNS record is missing`，说明 Cloudflare 里的 `lhp` 解析记录不存在或未生效，需要按上面的 CNAME 重新添加。
+
+## 架构决策记录
+
+关键取舍写在 `docs/decisions/`：
+
+- `2026-09-09-user-data-storage.md`：为什么把用户数据从 localStorage 迁到服务端 JSON 存储。
+- `2026-09-09-mobile-deployment.md`：移动端的部署形态与单实例约束。
+- `2026-11-06-practice-loop-and-time-spent.md`：首刷口径、按题计时与复习队列的取舍。
 
 ## 安全说明
 
