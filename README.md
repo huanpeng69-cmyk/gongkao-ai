@@ -166,6 +166,10 @@ npm run check:site
 - `2026-09-09-mobile-deployment.md`：移动端的部署形态与单实例约束。
 - `2026-11-06-practice-loop-and-time-spent.md`：首刷口径、按题计时与复习队列的取舍。
 
+## 感谢和参考
+
+[https://linux.do/](https://linux.do/) 感谢佬友
+
 ## 安全说明
 
 - 仓库只保留 `.env.example`，真实 `.env` 已被忽略。
