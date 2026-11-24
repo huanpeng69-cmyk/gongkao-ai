@@ -35,8 +35,19 @@ type Database = {
   users: Record<string, ServerUser>;
   sessions: Record<string, ServerSession>;
   appData: Record<string, AppData>;
+  // 学习数据版本号（乐观锁）。旧库没有此字段：已有数据视为版本 1。
+  appDataVersion: Record<string, number>;
   usage: UsageRecord[];
 };
+
+// 存储驱动：json（默认，单实例 users.json）| pg（PostgreSQL，见 docs/decisions/2026-11-23-database-migration.md）。
+// 业务规则（哈希、校验、聚合）两种驱动共用；store-pg.ts 只负责 SQL。
+function usePg() {
+  const driver = (process.env.STORAGE_DRIVER || "json").toLowerCase();
+  if (driver !== "json" && driver !== "pg") throw new Error(`未知 STORAGE_DRIVER: ${driver}`);
+  return driver === "pg";
+}
+const pgStore = () => import("./store-pg");
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const dataDirectory = process.env.GONGKAO_DATA_DIR || path.join(process.cwd(), "data", "server");
@@ -46,7 +57,7 @@ const databasePath = path.join(dataDirectory, "users.json");
 let writeQueue = Promise.resolve();
 
 function emptyDatabase(): Database {
-  return { users: {}, sessions: {}, appData: {}, usage: [] };
+  return { users: {}, sessions: {}, appData: {}, appDataVersion: {}, usage: [] };
 }
 
 // 读取磁盘最新库（不做进程级缓存，跨实例写后立即可见）。
@@ -73,6 +84,7 @@ async function readDatabase(): Promise<Database> {
     (parsed.users !== undefined && !isPlainObject(parsed.users)) ||
     (parsed.sessions !== undefined && !isPlainObject(parsed.sessions)) ||
     (parsed.appData !== undefined && !isPlainObject(parsed.appData)) ||
+    (parsed.appDataVersion !== undefined && !isPlainObject(parsed.appDataVersion)) ||
     (parsed.usage !== undefined && !Array.isArray(parsed.usage))
   ) {
     throw new Error(`用户数据库结构非法，已拒绝任何写入以便人工恢复: ${databasePath}`);
@@ -82,6 +94,7 @@ async function readDatabase(): Promise<Database> {
     users: (parsed.users as Database["users"] | undefined) ?? {},
     sessions: (parsed.sessions as Database["sessions"] | undefined) ?? {},
     appData: (parsed.appData as Database["appData"] | undefined) ?? {},
+    appDataVersion: (parsed.appDataVersion as Database["appDataVersion"] | undefined) ?? {},
     usage: (parsed.usage as Database["usage"] | undefined) ?? [],
   };
 }
@@ -160,6 +173,10 @@ export async function createUser(input: { username: string; displayName: string;
     createdAt: now,
     lastLoginAt: now,
   };
+  if (usePg()) {
+    const inserted = await (await pgStore()).insertUser(user);
+    return inserted ? { ok: true as const, user } : { ok: false as const, message: "这个账号已经注册过了" };
+  }
   return withFreshDb<{ ok: true; user: ServerUser } | { ok: false; message: string }>((db) => {
     if (db.users[username]) return { ok: false, message: "这个账号已经注册过了" };
     db.users[username] = user;
@@ -169,6 +186,14 @@ export async function createUser(input: { username: string; displayName: string;
 
 export async function verifyUser(usernameInput: string, password: string) {
   const username = normalizeUsername(usernameInput);
+  if (usePg()) {
+    const pg = await pgStore();
+    const user = await pg.findUserByUsername(username);
+    if (!user || !sameSecret(hashPassword(password, user.salt), user.passwordHash)) return null;
+    user.lastLoginAt = new Date().toISOString();
+    await pg.touchLastLogin(user.id, user.lastLoginAt);
+    return user;
+  }
   return withFreshDb<ServerUser | null>((db) => {
     const user = db.users[username];
     if (!user || !sameSecret(hashPassword(password, user.salt), user.passwordHash)) return null;
@@ -179,6 +204,10 @@ export async function verifyUser(usernameInput: string, password: string) {
 
 export async function createSession(userId: string) {
   const token = randomBytes(32).toString("base64url");
+  if (usePg()) {
+    await (await pgStore()).insertSession(hashSessionToken(token), userId, Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS);
+    return { token, maxAge: SESSION_TTL_SECONDS };
+  }
   return withFreshDb<{ token: string; maxAge: number }>((db) => {
     db.sessions[hashSessionToken(token)] = {
       userId,
@@ -190,6 +219,7 @@ export async function createSession(userId: string) {
 
 export async function getUserBySession(token: string) {
   const tokenHash = hashSessionToken(token);
+  if (usePg()) return (await pgStore()).findUserBySession(tokenHash, Math.floor(Date.now() / 1000));
   return withFreshDb<ServerUser | null>((db) => {
     const session = db.sessions[tokenHash];
     if (!session) return null;
@@ -202,21 +232,66 @@ export async function getUserBySession(token: string) {
 }
 
 export async function deleteSession(token: string) {
+  if (usePg()) return (await pgStore()).removeSession(hashSessionToken(token));
   await withFreshDb<void>((db) => {
     delete db.sessions[hashSessionToken(token)];
   });
 }
 
 export async function getUserData(userId: string): Promise<AppData | null> {
+  if (usePg()) return (await (await pgStore()).readAppData(userId))?.data ?? null;
   // 纯读也走磁盘最新，保证跨实例写后立即可见。
   const database = await readDatabase();
   return database.appData[userId] || null;
 }
 
-export async function saveUserData(userId: string, data: AppData) {
-  await withFreshDb<void>((db) => {
+export type SaveAppDataResult =
+  | { ok: true; version: number }
+  | { ok: false; conflict: true; currentVersion: number | null };
+
+// JSON 驱动的版本号：旧库没有 appDataVersion 时，已有数据视为版本 1，与 PG 导入（version=1）口径一致。
+function jsonAppDataVersion(db: Database, userId: string) {
+  const stored = db.appDataVersion[userId];
+  if (typeof stored === "number" && Number.isInteger(stored) && stored > 0) return stored;
+  return db.appData[userId] ? 1 : 0;
+}
+
+/** 无条件整包保存（兼容不带版本号的旧客户端）。返回保存后的版本号；版本照样 +1，让其它设备能感知到变化。 */
+export async function saveUserData(userId: string, data: AppData): Promise<number> {
+  if (usePg()) {
+    const result = await (await pgStore()).writeAppData(userId, data);
+    return result.ok ? result.version : 0;
+  }
+  return withFreshDb<number>((db) => {
+    const next = jsonAppDataVersion(db, userId) + 1;
     db.appData[userId] = data;
+    db.appDataVersion[userId] = next;
+    return next;
   });
+}
+
+/**
+ * 带乐观锁的保存，两种驱动行为一致。expectedVersion=0 表示「期望尚无数据」。
+ * 版本不一致返回 conflict（调用方回 409），绝不静默覆盖。
+ */
+export async function saveUserDataVersioned(userId: string, data: AppData, expectedVersion: number): Promise<SaveAppDataResult> {
+  if (usePg()) return (await pgStore()).writeAppData(userId, data, expectedVersion);
+  return withFreshDb<SaveAppDataResult>((db) => {
+    const current = jsonAppDataVersion(db, userId);
+    if (current !== expectedVersion) {
+      return { ok: false, conflict: true, currentVersion: db.appData[userId] ? current : null };
+    }
+    db.appData[userId] = data;
+    db.appDataVersion[userId] = current + 1;
+    return { ok: true, version: current + 1 };
+  });
+}
+
+export async function getUserDataWithVersion(userId: string): Promise<{ data: AppData; version: number } | null> {
+  if (usePg()) return (await pgStore()).readAppData(userId);
+  const database = await readDatabase();
+  const data = database.appData[userId];
+  return data ? { data, version: jsonAppDataVersion(database, userId) } : null;
 }
 
 // 单个用户最多保留多少条用量记录。超出后丢弃最旧的，防止 users.json 无限膨胀。
@@ -244,6 +319,10 @@ export async function recordUsage(input: {
     cached: Boolean(input.cached),
     createdAt: new Date().toISOString(),
   };
+  if (usePg()) {
+    await (await pgStore()).insertUsage(record, USAGE_MAX_PER_USER);
+    return;
+  }
   await withFreshDb<void>((db) => {
     if (!Array.isArray(db.usage)) db.usage = [];
     db.usage.push(record);
@@ -267,8 +346,9 @@ export async function recordUsage(input: {
 
 // 聚合某个用户的用量。时间边界按 UTC+8 归日，与 lib/store.ts 的本地日期口径一致。
 export async function getUsageSummary(userId: string) {
-  const database = await readDatabase();
-  const records = (Array.isArray(database.usage) ? database.usage : []).filter((r) => r.userId === userId);
+  const records: UsageRecord[] = usePg()
+    ? await (await pgStore()).listUsage(userId)
+    : ((await readDatabase()).usage || []).filter((r) => r.userId === userId);
 
   const TZ_OFFSET_MS = 8 * 60 * 60 * 1000;
   const dayKey = (iso: string) => new Date(new Date(iso).getTime() + TZ_OFFSET_MS).toISOString().slice(0, 10);

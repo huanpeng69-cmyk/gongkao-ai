@@ -14,10 +14,14 @@
     "apk:debug": "npm run build:mobile && npx cap sync android && cd android && gradlew assembleDebug",
     "check:site": "powershell -ExecutionPolicy Bypass -File scripts/check-site-health.ps1",
     "audit:questions": "node scripts/audit-question-bank.js",
-    "test": "node scripts/verify-store.mjs && node scripts/verify-client-store.mjs"
+    "test": "node scripts/verify-store.mjs && node scripts/verify-client-store.mjs",
+    "test:pg": "node scripts/verify-store-pg.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:import-json": "node scripts/migrate-json-to-pg.mjs"
   },
   "dependencies": {
     "next": "^14.2.0",
+    "pg": "^8.13.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "three": "^0.184.0"
@@ -28,6 +32,7 @@
     "@capacitor/core": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "@types/node": "^20",
+    "@types/pg": "^8.11.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/three": "^0.184.1",

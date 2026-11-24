@@ -46,6 +46,8 @@ yarn-error.log*
 *.pid
 __pycache__/
 *.py[cod]
+# 迁移辅助脚本（*.bat）写出的结果日志，属于本机一次性产物，不入库
+*-pg.txt
 
 # generated / temporary data
 /data/server/

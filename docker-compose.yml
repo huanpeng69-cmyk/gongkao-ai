@@ -29,6 +29,10 @@ services:
     environment:
       # 持久化数据目录（容器内路径，对应下方挂载的卷）。
       GONGKAO_DATA_DIR: /data
+      # 存储驱动：默认 json；切到 PostgreSQL 时在 .env 设 STORAGE_DRIVER=pg 和 POSTGRES_PASSWORD，
+      # 并先执行 npm run db:migrate / db:import-json（见 docs/decisions/2026-11-23-database-migration.md）。
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-json}
+      DATABASE_URL: ${DATABASE_URL:-postgres://gongkao:${POSTGRES_PASSWORD:-change-me}@postgres:5432/gongkao}
       # 公开服务端绝不允许把 AI 密钥打进前端产物。
       EMBED_PUBLIC_AI_KEYS: "0"
       # AI / 图片密钥：从宿主机环境或 .env 注入，缺省为空（不启用对应能力）。
@@ -45,6 +49,29 @@ services:
       # GONGKAO_ALLOW_ANON_AI: "1"
     volumes:
       - gongkao-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # —— PostgreSQL（阶段 1 起可选；生产建议换成云厂商托管 RDS，并把 DATABASE_URL 指过去）——
+  postgres:
+    image: postgres:16-alpine
+    container_name: gongkao-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gongkao
+      POSTGRES_USER: gongkao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      # 仅绑回环，便于本机执行迁移脚本；不对公网开放。宿主机端口默认 5433，避免与本机已装的 PostgreSQL(5432) 冲突。
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gongkao -d gongkao"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # —— TLS 反向代理：对外唯一入口（80/443 → HTTPS → gongkao-ai:3000）——
   # 生产必须走这里：会话 Cookie 在 NODE_ENV=production 下带 Secure 属性，
@@ -70,6 +97,7 @@ services:
         condition: service_healthy
 volumes:
   gongkao-data:
+  postgres-data:
   caddy-data:
   caddy-config:
 
