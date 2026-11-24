@@ -53,20 +53,65 @@ npm run dev
 打开 `http://localhost:3000`。
 
 ## 测试与 CI
-
 ```bash
-npm test              # 服务端 store 23 条 + 客户端 store 18 条断言
+npm test              # 服务端 store 31 条 + 客户端 store 30 条断言
 npx tsc --noEmit      # 类型检查
 ```
 
-- `scripts/verify-store.mjs`：服务端 JSON 存储的并发写入、会话、用量记录与复习队列。
-- `scripts/verify-client-store.mjs`：客户端 store 的首刷幂等、按题计时、学习时长入账、错题队列不截断。
+PostgreSQL 驱动另有独立回归（需一个库名含 `test` 的空库，测试会清空其中的表）：
 
-`.github/workflows/ci.yml` 在 push 到 `main` 和所有 Pull Request 上执行类型检查与上述测试；`deploy-pages.yml` 负责静态站发布，`site-health.yml` 每 30 分钟检查线上站点与 DNS。
+```bash
+set TEST_DATABASE_URL=postgres://gongkao:change-me@localhost:5433/gongkao_test
+npm run test:pg       # 19 条：建表、注册、会话、版本冲突、用量
+```
+
+- `scripts/verify-store.mjs`：服务端 JSON 存储的并发写入、会话、用量记录与复习队列。
+- `scripts/verify-client-store.mjs`：客户端 store 的首刷幂等、按题计时、学习时长入账、错题队列不截断、多设备冲突重放。
+- `scripts/verify-store-pg.mjs`：PostgreSQL 驱动的同一批契约，外加乐观锁与用户隔离。
+- `scripts/smoke-api.mjs`：真实 HTTP 冒烟（先 `npm run dev`，再 `node scripts/smoke-api.mjs`）。
+
+`.github/workflows/ci.yml` 在 push 到 `main` 和所有 Pull Request 上执行类型检查与上述测试（含 PostgreSQL 服务）；`deploy-pages.yml` 负责静态站发布，`site-health.yml` 每 30 分钟检查线上站点与 DNS。
 
 ## 用户数据存储
 
-账号、密码校验信息、答题记录、错题本和学习统计由 Node 服务端保存，登录状态使用 HttpOnly Cookie；浏览器 `localStorage` 仅保留界面偏好和非敏感的展示信息。默认数据目录为 `data/server/users.json`，该目录已加入 `.gitignore`，部署到服务器时必须把 `GONGKAO_DATA_DIR` 指向持久化磁盘或挂载卷。GitHub Pages 等纯静态托管没有服务端 API 和持久化数据库，不适合承载登录及用户数据；需要使用 `npm run dev` / `npm start` 的 Node 服务，或接入正式数据库后再对外部署。
+账号、密码校验信息、答题记录、错题本和学习统计由 Node 服务端保存，登录状态使用 HttpOnly Cookie；浏览器 `localStorage` 仅保留界面偏好和非敏感的展示信息。
+
+存储后端由 `STORAGE_DRIVER` 决定，业务规则与接口在两种驱动下完全一致：
+
+| 驱动 | 取值 | 适用场景 |
+|---|---|---|
+| JSON 文件 | `json`（默认） | 单机自用、本地开发；`data/server/users.json` 全量读写，仅在单进程内串行 |
+| PostgreSQL | `pg` | 多实例部署、多设备共享数据；需要 `DATABASE_URL` |
+
+JSON 驱动的默认目录是 `data/server/users.json`（已加入 `.gitignore`），部署时必须把 `GONGKAO_DATA_DIR` 指向持久化磁盘或挂载卷。JSON 文件存储只在单实例常驻进程下成立，多副本部署请切到 PostgreSQL。
+
+### 切换到 PostgreSQL
+
+```bash
+# 1. 备份现有数据（脚本只读 users.json，不删不改）
+cp data/server/users.json data/server/users.json.before-pg
+
+# 2. 起库并建表
+docker compose up -d postgres
+npm run db:migrate
+
+# 3. 幂等导入（可重复执行，完成后自动核对条数）
+npm run db:import-json            # 加 -- --dry-run 只预览不写入
+
+# 4. 在 .env.local 设置并重启
+STORAGE_DRIVER=pg
+DATABASE_URL=postgres://gongkao:change-me@localhost:5433/gongkao
+```
+
+回滚：把 `STORAGE_DRIVER` 改回 `json` 后重启，原 `users.json` 始终保留、未被修改。
+
+Windows 下也可以用仓库根的 `切换到PostgreSQL.bat`（备份 → 起库 → 导入 → 写 `.env.local`，任一步失败即停）和 `验证数据库迁移.bat`（串起类型检查、两种驱动的测试、导入预览与构建）。
+
+> 宿主机端口默认 `5433`：本机常已占用 5432，容器直接绑 5432 会冲突或连到别的库。若报 `28P01 密码认证失败`，先确认连的是不是 `gongkao-postgres` 容器。
+
+多设备同时保存时，接口用版本号 + `If-Match` 做乐观锁：冲突返回 409 并附服务端最新数据，客户端以服务端数据为底重放本机未确认的操作，不再静默覆盖。
+
+GitHub Pages 等纯静态托管没有服务端 API 和持久化数据库，不适合承载登录及用户数据；需要使用 `npm run dev` / `npm start` 的 Node 服务，或接入正式数据库后再对外部署。
 
 ## Agnes AI 配置
 
