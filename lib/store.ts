@@ -7,6 +7,18 @@ let dataCache: AppData | null = null;
 let dataCacheUser = "";
 let saveQueue = Promise.resolve();
 
+// ==================== 多设备同步（阶段 2a） ====================
+// 每次修改都记成一个「操作」（op），保存时带上服务端版本号（If-Match）。
+// 若其它设备已先保存（服务端返回 409），就以服务端最新数据为底，把本机尚未确认的操作按顺序重放一遍再保存，
+// 两台设备的进度都保留，不再「后保存的整包覆盖先保存的」。见 docs/decisions/2026-11-23-database-migration.md。
+type DataOp = (data: AppData) => unknown; // 返回 false 表示本次没有改动，不触发保存
+export const DATA_SYNCED_EVENT = "gongkao:data-synced";
+const MAX_PENDING_OPS = 500;
+const MAX_CONFLICT_RETRIES = 3;
+let syncedVersion: number | null = null; // null = 服务端没给版本号（旧服务端/尚未同步），保存时不带 If-Match
+let pendingOps: DataOp[] = [];
+let lastCommitted: string | null = null; // 最近一次提交后的数据快照，用来识别外部 saveData 改了哪些字段
+
 function getUserName() {
   if (typeof window === "undefined") return "学员";
   return getCurrentDisplayName();
@@ -56,39 +68,126 @@ export function loadData(): AppData {
   return getDefaultData();
 }
 
-export function saveData(data: AppData) {
-  if (typeof window === "undefined") return;
+function cloneJson<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+function normalizeData(data: AppData) {
+  data.user.name = getUserName();
+  if (!data.dailyHistory) data.dailyHistory = [];
+  if (!data.studySessions) data.studySessions = [];
+  return data;
+}
+
+function enqueueOp(op: DataOp) {
+  pendingOps.push(op);
+  // 长时间离线只保留最近的操作，防止内存无限增长；被丢弃的操作已体现在本机数据里，只是冲突时无法重放。
+  if (pendingOps.length > MAX_PENDING_OPS) pendingOps.splice(0, pendingOps.length - MAX_PENDING_OPS);
+}
+
+function persist(data: AppData) {
   data.user.name = getUserName();
   dataCache = data;
   dataCacheUser = getCurrentDisplayName();
-  const payload = JSON.stringify(data);
-  saveQueue = saveQueue.then(async () => {
+  lastCommitted = JSON.stringify(data);
+  saveQueue = saveQueue.then(flushPending).catch(() => undefined);
+}
+
+/** store 内部统一的修改入口：在当前数据上执行 op，并记入待同步队列。 */
+function mutate(op: DataOp): AppData {
+  const data = loadData();
+  if (op(data) === false) return data;
+  if (typeof window === "undefined") return data;
+  enqueueOp(op);
+  persist(data);
+  return data;
+}
+
+/** 以服务端数据为底，重放本机尚未确认的操作。 */
+function rebase(serverData: AppData | null, version: number | null, notify: boolean) {
+  const base = normalizeData(serverData || getDefaultData());
+  for (const op of pendingOps) op(base);
+  dataCache = base;
+  dataCacheUser = getCurrentDisplayName();
+  lastCommitted = JSON.stringify(base);
+  syncedVersion = version;
+  if (notify && typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent(DATA_SYNCED_EVENT));
+  }
+}
+
+async function flushPending() {
+  for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
+    if (!dataCache || pendingOps.length === 0) return;
+    const sentOps = pendingOps.length;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (syncedVersion !== null) headers["If-Match"] = String(syncedVersion);
+    let response: Response;
     try {
-      await fetch("/api/data", {
+      response = await fetch("/api/data", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers,
         credentials: "include",
-        body: payload,
+        body: JSON.stringify(dataCache),
       });
     } catch {
-      // The in-memory cache keeps the current session usable while the server recovers.
+      // 离线：操作留在队列里，下次修改时一并同步；内存缓存保证当前会话可用。
+      return;
     }
-  });
+    const body = (await response.json().catch(() => null)) as { version?: unknown; data?: AppData | null } | null;
+    if (response.ok) {
+      if (typeof body?.version === "number") syncedVersion = body.version;
+      // 发送期间新增的操作还在队列里，由它们各自排队的保存发出。
+      pendingOps.splice(0, sentOps);
+      return;
+    }
+    if (response.status !== 409 || typeof body?.version !== "number") return;
+    rebase(body.data ?? null, body.version, true);
+  }
+}
+
+/**
+ * 外部直接整包保存（如百宝箱）。与上次提交的快照比对出改动的顶层字段，记成「覆盖这些字段」的操作，
+ * 冲突重放时只覆盖这些字段，不会抹掉其它设备的进度。
+ */
+export function saveData(data: AppData) {
+  if (typeof window === "undefined") return;
+  data.user.name = getUserName();
+  const before = lastCommitted ? (JSON.parse(lastCommitted) as Record<string, unknown>) : null;
+  const current = data as unknown as Record<string, unknown>;
+  const keys = Array.from(new Set([...Object.keys(current), ...(before ? Object.keys(before) : [])]));
+  const changed = before ? keys.filter((key) => JSON.stringify(current[key]) !== JSON.stringify(before[key])) : keys;
+  if (changed.length > 0) {
+    const snapshot = cloneJson(current);
+    enqueueOp((target) => {
+      const record = target as unknown as Record<string, unknown>;
+      for (const key of changed) {
+        if (snapshot[key] === undefined) delete record[key];
+        else record[key] = cloneJson(snapshot[key]);
+      }
+    });
+  }
+  persist(data);
+}
+
+/** 等待本机所有待保存的修改发送完成。 */
+export function waitForSync() {
+  return saveQueue;
 }
 
 export async function hydrateData() {
   if (typeof window === "undefined" || !isAuthenticated()) return loadData();
   try {
+    // 先把本机待保存的修改发出去，避免刚做的题被服务端旧数据盖掉。
+    await saveQueue;
     const response = await fetch("/api/data", { credentials: "include", cache: "no-store" });
     if (!response.ok) return loadData();
     const payload = await response.json();
-    const data = payload.data as AppData | null;
-    dataCache = data || getDefaultData();
-    dataCache.user.name = getUserName();
-    if (!dataCache.dailyHistory) dataCache.dailyHistory = [];
-    if (!dataCache.studySessions) dataCache.studySessions = [];
-    dataCacheUser = getCurrentDisplayName();
-    return dataCache;
+    // 换了账号：上个账号没同步出去的操作不能重放到新账号上。
+    if (dataCacheUser !== getCurrentDisplayName()) pendingOps = [];
+    rebase((payload.data as AppData | null) || null, typeof payload.version === "number" ? payload.version : null, false);
+    if (pendingOps.length > 0) saveQueue = saveQueue.then(flushPending).catch(() => undefined);
+    return dataCache || loadData();
   } catch {
     return loadData();
   }
@@ -103,63 +202,63 @@ export function recordAnswer(
   moduleKey?: string,
   minutesSpent = 0,
 ) {
-  const data = loadData();
-  const today = getToday();
-  // 首刷口径：重复作答只补记耗时与错题本，不再累加题数/正确数，避免二刷污染正确率。
-  const isFirstAttempt = !data.answeredIds.includes(question.id);
-  const minutes = Number.isFinite(minutesSpent) && minutesSpent > 0 ? Math.round(minutesSpent * 10) / 10 : 0;
+  return mutate((data) => {
+    const today = getToday();
+    // 首刷口径：重复作答只补记耗时与错题本，不再累加题数/正确数，避免二刷污染正确率。
+    const isFirstAttempt = !data.answeredIds.includes(question.id);
+    const minutes = Number.isFinite(minutesSpent) && minutesSpent > 0 ? Math.round(minutesSpent * 10) / 10 : 0;
 
-  if (isFirstAttempt) {
-    data.user.totalQuestions += 1;
-    data.user.todayDone += 1;
-    if (isCorrect) {
-      data.user.totalCorrect += 1;
-      data.user.todayCorrect += 1;
+    if (isFirstAttempt) {
+      data.user.totalQuestions += 1;
+      data.user.todayDone += 1;
+      if (isCorrect) {
+        data.user.totalCorrect += 1;
+        data.user.todayCorrect += 1;
+      }
+
+      // Update knowledge profile
+      const kp = data.user.knowledgeProfile[question.module] || (data.user.knowledgeProfile[question.module] = { correct: 0, total: 0, level: "中等" });
+      if (kp) {
+        kp.total += 1;
+        if (isCorrect) kp.correct += 1;
+        const rate = kp.total > 0 ? kp.correct / kp.total : 0;
+        kp.level = rate >= 0.8 ? "优秀" : rate >= 0.6 ? "中等" : rate >= 0.4 ? "薄弱" : "严重薄弱";
+      }
     }
 
-    // Update knowledge profile
-    const kp = data.user.knowledgeProfile[question.module] || (data.user.knowledgeProfile[question.module] = { correct: 0, total: 0, level: "中等" });
-    if (kp) {
-      kp.total += 1;
-      if (isCorrect) kp.correct += 1;
-      const rate = kp.total > 0 ? kp.correct / kp.total : 0;
-      kp.level = rate >= 0.8 ? "优秀" : rate >= 0.6 ? "中等" : rate >= 0.4 ? "薄弱" : "严重薄弱";
+    // Add to error book if wrong
+    if (!isCorrect) {
+      const existing = data.errors.find((e) => e.questionId === question.id);
+      if (!existing) {
+        const errorType: ErrorType = "思路偏差";
+        data.errors.push({
+          questionId: question.id,
+          question,
+          userAnswer,
+          errorType,
+          errorDate: today,
+          loopStatus: "pending",
+          loopCount: 0,
+          reviewHistory: [{ date: today, correct: false }],
+          nextReviewDate: today, // 首次错题当天就要复习
+          easeFactor: 2.5,
+          interval: 0,
+        });
+      }
     }
-  }
 
-  // Add to error book if wrong
-  if (!isCorrect) {
-    const existing = data.errors.find((e) => e.questionId === question.id);
-    if (!existing) {
-      const errorType: ErrorType = "思路偏差";
-      data.errors.push({
-        questionId: question.id,
-        question,
-        userAnswer,
-        errorType,
-        errorDate: today,
-        loopStatus: "pending",
-        loopCount: 0,
-        reviewHistory: [{ date: today, correct: false }],
-        nextReviewDate: today, // 首次错题当天就要复习
-        easeFactor: 2.5,
-        interval: 0,
-      });
+    if (isFirstAttempt) {
+      data.answeredIds.push(question.id);
     }
-  }
 
-  if (isFirstAttempt) {
-    data.answeredIds.push(question.id);
-  }
+    // Update daily history
+    updateDailyHistory(data, today, question.module, isCorrect, moduleKey, isFirstAttempt, minutes);
 
-  // Update daily history
-  updateDailyHistory(data, today, question.module, isCorrect, moduleKey, isFirstAttempt, minutes);
+    // Update streak
+    updateStreak(data);
 
-  // Update streak
-  updateStreak(data);
-
-  saveData(data);
-  return data;
+    return data;
+  });
 }
 
 function ensureDailyRecord(data: AppData, today: string): DailyRecord {
@@ -210,12 +309,12 @@ function updateDailyHistory(
 
 /** 批量累加当天学习时长（整卷模考交卷时一次性记入）。 */
 export function addStudyMinutes(minutes: number) {
-  const data = loadData();
-  if (!Number.isFinite(minutes) || minutes <= 0) return data;
-  const record = ensureDailyRecord(data, getToday());
-  record.timeSpentMinutes = Math.round((record.timeSpentMinutes + minutes) * 10) / 10;
-  saveData(data);
-  return data;
+  return mutate((data) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return false;
+    const record = ensureDailyRecord(data, getToday());
+    record.timeSpentMinutes = Math.round((record.timeSpentMinutes + minutes) * 10) / 10;
+    return data;
+  });
 }
 
 function updateStreak(data: AppData) {
@@ -239,106 +338,106 @@ function updateStreak(data: AppData) {
 // ==================== 复习记录 ====================
 
 export function recordReview(questionId: string, result: boolean | ReviewRating) {
-  const data = loadData();
-  const today = getToday();
-  const err = data.errors.find((e) => e.questionId === questionId);
-  if (!err) return data;
+  return mutate((data) => {
+    const today = getToday();
+    const err = data.errors.find((e) => e.questionId === questionId);
+    if (!err) return false;
 
-  const rating: ReviewRating = typeof result === "boolean" ? (result ? "good" : "again") : result;
-  const isCorrect = rating !== "again";
+    const rating: ReviewRating = typeof result === "boolean" ? (result ? "good" : "again") : result;
+    const isCorrect = rating !== "again";
 
-  err.reviewHistory.push({ date: today, correct: isCorrect, rating });
+    err.reviewHistory.push({ date: today, correct: isCorrect, rating });
 
-  if (rating === "again") {
-    err.loopCount = 0;
-    err.loopStatus = "pending";
-    err.nextReviewDate = today; // 答错后立即回到今日队列
-    err.easeFactor = Math.max(1.3, (err.easeFactor || 2.5) - 0.2);
-    err.interval = 0;
-  } else {
-    err.loopCount += 1;
-    if (err.loopCount >= 3) {
-      err.loopStatus = "mastered";
-      err.nextReviewDate = undefined;
+    if (rating === "again") {
+      err.loopCount = 0;
+      err.loopStatus = "pending";
+      err.nextReviewDate = today; // 答错后立即回到今日队列
+      err.easeFactor = Math.max(1.3, (err.easeFactor || 2.5) - 0.2);
+      err.interval = 0;
     } else {
-      err.loopStatus = "reviewing";
-      const ef = err.easeFactor || 2.5;
-      const interval = err.interval || 0;
-      let newInterval: number;
-
-      if (rating === "hard") {
-        newInterval = 1;
-        err.easeFactor = Math.max(1.3, ef - 0.15);
-      } else if (rating === "easy") {
-        if (err.loopCount === 1) {
-          newInterval = 3;
-        } else if (err.loopCount === 2) {
-          newInterval = 7;
-        } else {
-          newInterval = Math.round(interval * ef * 1.5);
-        }
-        err.easeFactor = Math.min(3.0, ef + 0.15);
+      err.loopCount += 1;
+      if (err.loopCount >= 3) {
+        err.loopStatus = "mastered";
+        err.nextReviewDate = undefined;
       } else {
-        if (err.loopCount === 1) {
+        err.loopStatus = "reviewing";
+        const ef = err.easeFactor || 2.5;
+        const interval = err.interval || 0;
+        let newInterval: number;
+
+        if (rating === "hard") {
           newInterval = 1;
-        } else if (err.loopCount === 2) {
-          newInterval = 3;
+          err.easeFactor = Math.max(1.3, ef - 0.15);
+        } else if (rating === "easy") {
+          if (err.loopCount === 1) {
+            newInterval = 3;
+          } else if (err.loopCount === 2) {
+            newInterval = 7;
+          } else {
+            newInterval = Math.round(interval * ef * 1.5);
+          }
+          err.easeFactor = Math.min(3.0, ef + 0.15);
         } else {
-          newInterval = Math.round(interval * ef);
+          if (err.loopCount === 1) {
+            newInterval = 1;
+          } else if (err.loopCount === 2) {
+            newInterval = 3;
+          } else {
+            newInterval = Math.round(interval * ef);
+          }
+          err.easeFactor = Math.max(1.3, ef + (0.1 - (5 - 3) * (0.08 + (5 - 3) * 0.02)));
         }
-        err.easeFactor = Math.max(1.3, ef + (0.1 - (5 - 3) * (0.08 + (5 - 3) * 0.02)));
+
+        err.interval = newInterval;
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + newInterval);
+        err.nextReviewDate = getLocalDateKey(nextDate);
       }
-
-      err.interval = newInterval;
-      const nextDate = new Date();
-      nextDate.setDate(nextDate.getDate() + newInterval);
-      err.nextReviewDate = getLocalDateKey(nextDate);
     }
-  }
 
-  // Update daily review stats
-  let record = data.dailyHistory.find((r) => r.date === today);
-  if (!record) {
-    record = {
-      date: today,
-      totalDone: 0,
-      totalCorrect: 0,
-      moduleBreakdown: {},
-      errorTypes: {},
-      timeSpentMinutes: 0,
-      reviewDone: 0,
-      reviewCorrect: 0,
-    };
-    data.dailyHistory.push(record);
-  }
-  record.reviewDone += 1;
-  if (isCorrect) record.reviewCorrect += 1;
+    // Update daily review stats
+    let record = data.dailyHistory.find((r) => r.date === today);
+    if (!record) {
+      record = {
+        date: today,
+        totalDone: 0,
+        totalCorrect: 0,
+        moduleBreakdown: {},
+        errorTypes: {},
+        timeSpentMinutes: 0,
+        reviewDone: 0,
+        reviewCorrect: 0,
+      };
+      data.dailyHistory.push(record);
+    }
+    record.reviewDone += 1;
+    if (isCorrect) record.reviewCorrect += 1;
 
-  saveData(data);
-  return data;
+    return data;
+  });
 }
 
 // ==================== 学习时段 ====================
 
 export function startStudySession(mode: 'quiz' | 'review' | 'knowledge' = 'quiz') {
-  const data = loadData();
-  const now = new Date();
-  data.studySessions.push({
-    date: getToday(),
-    startTime: now.toISOString(),
-    questionsDone: 0,
-    mode,
+  return mutate((data) => {
+    const now = new Date();
+    data.studySessions.push({
+      date: getToday(),
+      startTime: now.toISOString(),
+      questionsDone: 0,
+      mode,
+    });
   });
-  saveData(data);
 }
 
 export function endStudySession() {
-  const data = loadData();
-  const session = data.studySessions[data.studySessions.length - 1];
-  if (session && !session.endTime) {
-    session.endTime = new Date().toISOString();
-  }
-  saveData(data);
+  return mutate((data) => {
+    const session = data.studySessions[data.studySessions.length - 1];
+    if (session && !session.endTime) {
+      session.endTime = new Date().toISOString();
+    }
+  });
 }
 
 // ==================== 复习计划 ====================
@@ -433,23 +532,24 @@ export function isLoggedIn(): boolean {
 
 /** 重置今日数据（每天首次访问时调用） */
 export function resetTodayIfNeeded() {
-  const data = loadData();
-  const today = getToday();
-  // Check if there's already a record for today
-  const todayRecord = data.dailyHistory.find((r) => r.date === today);
-  if (!todayRecord) {
-    // New day - reset today counters and check streak
-    const yesterdayDate = new Date();
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterday = getLocalDateKey(yesterdayDate);
-    const yesterdayRecord = data.dailyHistory.find((r) => r.date === yesterday);
-    if (!yesterdayRecord || yesterdayRecord.totalDone === 0) {
-      data.user.streak = 0;
+  return mutate((data) => {
+    const today = getToday();
+    // Check if there's already a record for today
+    const todayRecord = data.dailyHistory.find((r) => r.date === today);
+    if (!todayRecord) {
+      // New day - reset today counters and check streak
+      const yesterdayDate = new Date();
+      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+      const yesterday = getLocalDateKey(yesterdayDate);
+      const yesterdayRecord = data.dailyHistory.find((r) => r.date === yesterday);
+      if (!yesterdayRecord || yesterdayRecord.totalDone === 0) {
+        data.user.streak = 0;
+      }
+      data.user.todayDone = 0;
+      data.user.todayCorrect = 0;
     }
-    data.user.todayDone = 0;
-    data.user.todayCorrect = 0;
-    saveData(data);
-  }
+    return todayRecord ? false : undefined;
+  });
 }
 // ==================== 错因回填 ====================
 
@@ -461,10 +561,10 @@ export const KNOWN_ERROR_TYPES: ErrorType[] = [
 
 export function updateErrorType(questionId: string, errorType: string) {
   if (!KNOWN_ERROR_TYPES.includes(errorType as ErrorType)) return;
-  const data = loadData();
-  const err = data.errors.find((e) => e.questionId === questionId);
-  if (!err) return; // 只有真实答错的题才回填
-  err.errorType = errorType as ErrorType;
-  saveData(data);
-  return data;
+  return mutate((data) => {
+    const err = data.errors.find((e) => e.questionId === questionId);
+    if (!err) return false; // 只有真实答错的题才回填
+    err.errorType = errorType as ErrorType;
+    return data;
+  });
 }
