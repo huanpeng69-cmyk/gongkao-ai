@@ -62,13 +62,14 @@ PostgreSQL 驱动另有独立回归（需一个库名含 `test` 的空库，测�
 
 ```bash
 set TEST_DATABASE_URL=postgres://gongkao:change-me@localhost:5433/gongkao_test
-npm run test:pg       # 19 条：建表、注册、会话、版本冲突、用量
+npm run test:pg       # 25 条：建表、注册、会话、版本冲突、用量、作答流水
 ```
 
 - `scripts/verify-store.mjs`：服务端 JSON 存储的并发写入、会话、用量记录与复习队列。
 - `scripts/verify-client-store.mjs`：客户端 store 的首刷幂等、按题计时、学习时长入账、错题队列不截断、多设备冲突重放。
-- `scripts/verify-store-pg.mjs`：PostgreSQL 驱动的同一批契约，外加乐观锁与用户隔离。
-- `scripts/smoke-api.mjs`：真实 HTTP 冒烟（先 `npm run dev`，再 `node scripts/smoke-api.mjs`）。
+- `scripts/verify-store-pg.mjs`：PostgreSQL 驱动的同一批契约，外加乐观锁、用户隔离与作答流水级联删除。
+- `scripts/smoke-api.mjs`：真实 HTTP 冒烟，覆盖注册 / 会话 / 保存 / 版本冲突 / 用量。
+- `scripts/smoke-answers.mjs`：`POST /api/answers` 冒烟，覆盖 401、四种合法与非法入参与数组答案。
 
 `.github/workflows/ci.yml` 在 push 到 `main` 和所有 Pull Request 上执行类型检查与上述测试（含 PostgreSQL 服务）；`deploy-pages.yml` 负责静态站发布，`site-health.yml` 每 30 分钟检查线上站点与 DNS。
 
