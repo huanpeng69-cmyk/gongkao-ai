@@ -100,6 +100,24 @@
   冲突合并后发出 `gongkao:data-synced` 事件，`AuthGate` 弹提示「已同步其他设备的学习进度」。
 - 已知限制：冲突合并后，已经打开的页面不会自动刷新显示（下次进入页面或刷新即可看到合并结果）；需要时页面可监听同一事件自行刷新。
 
+## 阶段 2b 实施记录（2026-11-24）
+
+- 表：`db/migrations/002_answer_records.sql` 新建 `answer_records`（id / user_id / question_id / module / sub_module /
+  user_answer / is_correct / is_review / minutes_spent / answered_at / local_date），三个索引分别服务
+  「最近作答」「按日聚合」「同题历史」。`user_id` 外键 `ON DELETE CASCADE`。
+- 为什么冗余存 module / sub_module：阶段 3 题库入库前，统计不该回表题库；入库后可改为外键，届时另写记录。
+- 接口：`POST /api/answers`（`app/api/answers/route.ts`），只写不读，`GET /api/data` 的整包口径不变，客户端可不改造先接入。
+  校验：`questionId` 非空、`localDate` 必须 `YYYY-MM-DD`、`isCorrect` 必须布尔，否则 400；`userAnswer` 数组按逗号拼接。
+- 失败语义：流水是旁路数据，写失败返回 **202 + stored:false** 而不是 5xx，避免把整道题判为失败。
+- 两种驱动都实现：PG 走 `insertAnswerRecord` / `countAnswerRecords`；JSON 驱动写入 `users.json` 的 `answerRecords` 数组。
+- 验证：JSON 驱动 35/35（新增 A1/A2/A4/A5）、PG 驱动 25/25（新增 A1–A6，含级联删除）、
+  `scripts/smoke-answers.mjs` 端到端 8/8（401 / 注册 / 作答 / 数组答案 / 三种 400 / 最小字段）。
+- CI：`ci.yml` 拆成 `test`（JSON + 客户端）与 `postgres`（services.postgres:16-alpine + healthcheck）两个 job，
+  `TEST_DATABASE_URL` 指向库名含 `test` 的库（防误删保护）。
+- 踩坑：`readDatabase()` 原先把解析结果逐字段挑出来重建对象，新增 `answerRecords` 后忘了在这里补字段，
+  导致写入成功但读取恒为空。防再犯：`Database` 加字段时必须同时改 `readDatabase()` 的返回对象与结构校验，
+  并且两种驱动各写一条读取断言——这次正是 PG 全绿、JSON 三条红才暴露出问题。
+
 ## 不变量与防再犯检查
 
 - 沿用 F4 不变量：读取失败不得降级为空库再写回；PG 实现中查询错误一律抛出，不返回空数据。
