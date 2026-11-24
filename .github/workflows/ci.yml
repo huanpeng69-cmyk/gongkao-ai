@@ -25,5 +25,42 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      - name: Unit tests
+      - name: Unit tests (JSON driver + client store)
         run: npm test
+
+  postgres:
+    runs-on: ubuntu-latest
+    # 与 JSON 驱动分开成 job：PostgreSQL 服务只在需要时启动，JSON 用例失败不会掩盖它。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gongkao_test
+          POSTGRES_USER: gongkao
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # 等数据库真正可接受连接再跑用例，避免首次连接被拒造成假红。
+        options: >-
+          --health-cmd "pg_isready -U gongkao -d gongkao_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # 库名含 test 是 scripts/verify-store-pg.mjs 的防误删保护，不要改成非 test 名字。
+      TEST_DATABASE_URL: postgres://gongkao:postgres@localhost:5432/gongkao_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: PostgreSQL driver tests
+        run: npm run test:pg
