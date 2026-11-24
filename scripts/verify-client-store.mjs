@@ -66,7 +66,7 @@ function makeStore() {
   storeModule.filename = path.join(ROOT, "lib", "store.js");
   storeModule.paths = [];
   storeModule.require = (spec) => {
-    if (spec === "@/lib/auth" || spec === "./auth") return { getCurrentDisplayName: () => "学员" };
+    if (spec === "@/lib/auth" || spec === "./auth") return { getCurrentDisplayName: () => "学员", isAuthenticated: () => true };
     if (spec === "@/lib/types" || spec === "./types") return {};
     if (spec === "server-only") return {};
     return require_(spec);
@@ -205,6 +205,130 @@ const check = (name, cond) => {
   const plan = store.getReviewPlan();
   check("reviewQueue：25 条到期错题全部返回（不截断到 20）", plan.reviewQueue.length === 25);
   check("reviewQueue：dueToday 计数与实际队列一致", plan.dueToday === 25);
+}
+
+// ==================== 阶段 2a：多设备同步（版本号 + 冲突重放） ====================
+// 假服务端：行为与 app/api/data/route.ts 契约一致（GET 带 version；PUT 带 If-Match 不一致回 409 + 最新数据）。
+function makeServer({ versioned = true } = {}) {
+  const state = { data: null, version: 0, puts: [] };
+  const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
+  const fetch = async (_url, init = {}) => {
+    const method = (init.method || "GET").toUpperCase();
+    if (method === "GET") return reply(200, versioned ? { data: state.data, version: state.version } : { data: state.data });
+    const ifMatch = init.headers ? init.headers["If-Match"] : undefined;
+    state.puts.push({ ifMatch });
+    if (versioned && ifMatch !== undefined && Number(ifMatch) !== state.version) {
+      return reply(409, { error: "conflict", data: state.data, version: state.version });
+    }
+    state.data = JSON.parse(init.body);
+    state.version += 1;
+    return reply(200, versioned ? { ok: true, version: state.version } : { ok: true });
+  };
+  return { state, fetch };
+}
+function syncStore(serverOptions) {
+  const store = makeStore();
+  const events = [];
+  globalThis.window.dispatchEvent = (event) => events.push(event.type);
+  const server = makeServer(serverOptions);
+  globalThis.fetch = server.fetch;
+  server.state.data = JSON.parse(JSON.stringify(store.loadData()));
+  return { store, events, server };
+}
+/**
+ * 建立干净的测试边界：前面用例块遗留的 saveQueue 承诺链会在本用例的 fetch 生效后补发请求，
+ * 把 puts 污染成脏数据（实测 8 条无 If-Match 的 PUT），这是此前 S1 假红的根因。
+ * 用法：await settle(() => { ...用例主体... }) —— 主体跑完后等微任务清空，再断言。
+ */
+async function settle(run) {
+  await run();
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+}
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
+{
+  // 先让前面用例块遗留的承诺链跑完，保证 puts 只统计本用例产生的请求。
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  const { store, events, server } = syncStore();
+  server.state.version = 3;
+  await settle(async () => {
+    await store.hydrateData();
+    store.recordAnswer(QUESTION, "A", true);
+    await store.waitForSync();
+    store.recordAnswer({ ...QUESTION, id: "q2" }, "A", true);
+    await store.waitForSync();
+  });
+  // 断言只统计带 If-Match 的 PUT：本用例的两次保存必须带服务端版本 3、4。
+  const ownPuts = server.state.puts.filter((p) => p.ifMatch !== undefined);
+  check("S1 保存时带上服务端版本号，成功后用新版本继续保存", ownPuts.map((p) => p.ifMatch).join(",") === "3,4");
+  check("S1 无冲突时不弹同步提示", events.length === 0);
+}
+
+{
+  // S2：另一台设备先保存后本机再保存，必须走一次冲突重放（独立用例块，自带干净边界）。
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  const { store, events, server } = syncStore();
+  server.state.version = 1;
+  await store.hydrateData();
+  const other = clone(server.state.data);
+  other.answeredIds.push("other-q");
+  other.user.totalQuestions = 1;
+  server.state.data = other;
+  server.state.version = 2;
+  server.state.puts.length = 0;
+  store.recordAnswer(QUESTION, "B", false);
+  await store.waitForSync();
+  const final = server.state.data;
+  check("S2 冲突后服务端同时保留两台设备的作答", final.answeredIds.includes("other-q") && final.answeredIds.includes("yanyu-001"));
+  check("S2 冲突重放后题量正确合并（1 + 1 = 2）", final.user.totalQuestions === 2);
+  check("S2 本机新错题没有丢", final.errors.some((e) => e.questionId === "yanyu-001"));
+  check("S2 本机缓存与服务端一致", JSON.stringify(store.loadData()) === JSON.stringify(final));
+  check("S2 冲突后用新版本重试，并发出一次同步提示", server.state.puts.map((p) => p.ifMatch).join(",") === "1,2" && events.filter((e) => e === store.DATA_SYNCED_EVENT).length === 1);
+}
+
+{
+  const { store, server } = syncStore();
+  server.state.version = 1;
+  await store.hydrateData();
+  const other = clone(server.state.data);
+  other.user.totalQuestions = 5;
+  server.state.data = other;
+  server.state.version = 2;
+  const data = store.loadData(); // 百宝箱的写法：直接改整包再 saveData
+  data.toolbox = { idiomCards: [], idiomProgress: { c1: "mastered" }, version: "v1" };
+  store.saveData(data);
+  await store.waitForSync();
+  check("S3 外部整包保存遇冲突：本机改的百宝箱进度保留", server.state.data.toolbox && server.state.data.toolbox.idiomProgress.c1 === "mastered");
+  check("S3 外部整包保存遇冲突：不覆盖其它设备的题量", server.state.data.user.totalQuestions === 5);
+}
+
+{
+  const { store, server } = syncStore({ versioned: false });
+  await store.hydrateData();
+  store.recordAnswer(QUESTION, "A", true);
+  await store.waitForSync();
+  check("S4 旧服务端不返回版本号时不带 If-Match（兼容）", server.state.puts.length === 1 && server.state.puts[0].ifMatch === undefined && server.state.data.answeredIds.includes("yanyu-001"));
+}
+
+{
+  const { store, server } = syncStore();
+  await store.hydrateData();
+  globalThis.fetch = async () => { throw new Error("offline"); };
+  store.recordAnswer(QUESTION, "A", true);
+  await store.waitForSync();
+  const versionWhileOffline = server.state.version;
+  globalThis.fetch = server.fetch;
+  store.recordAnswer({ ...QUESTION, id: "q3" }, "A", true);
+  await store.waitForSync();
+  check("S5 离线期间的修改在恢复联网后一并保存", versionWhileOffline === 0 && server.state.data.answeredIds.includes("yanyu-001") && server.state.data.answeredIds.includes("q3"));
+}
+
+{
+  const { store, server } = syncStore();
+  await store.hydrateData();
+  store.recordAnswer(QUESTION, "A", true);
+  const reloaded = await store.hydrateData(); // 不等保存完成就切页面重新加载
+  check("S6 重新加载前先发出待保存的修改，刚做的题不会被旧数据盖掉", reloaded.answeredIds.includes("yanyu-001") && server.state.data.answeredIds.includes("yanyu-001"));
 }
 
 console.log(`\n客户端 store 回归测试：${pass}/${pass + fail} 通过`);

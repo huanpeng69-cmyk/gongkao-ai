@@ -191,6 +191,42 @@ async function main() {
     check("U3 损坏库时记录用量被拒（fail-closed）", err !== null);
     check("U3 损坏文件未被覆盖", readRaw(dbFile(dir)) === "{ 坏数据 ");
   }
+  // --- V：学习数据版本号（阶段 2a 乐观锁，JSON 驱动与 PG 行为一致） ---
+  {
+    const dir = makeDataDir();
+    const store = loadStore(dir);
+    const u = await store.createUser({ username: "ver", displayName: "Ver", password: "secret1" });
+    const uid = u.user.id;
+    const doc = (n) => ({ user: { name: "Ver", totalQuestions: n }, errors: [], dailyHistory: [] });
+    check("V1 无数据时读取版本为 null", (await store.getUserDataWithVersion(uid)) === null);
+    const first = await store.saveUserDataVersioned(uid, doc(1), 0);
+    const dup = await store.saveUserDataVersioned(uid, doc(2), 0);
+    check("V2 expectedVersion=0 首次写入成功（版本 1），重复则冲突", first.ok === true && first.version === 1 && dup.ok === false && dup.currentVersion === 1);
+    const second = await store.saveUserDataVersioned(uid, doc(3), 1);
+    const stale = await store.saveUserDataVersioned(uid, doc(99), 1);
+    check("V3 版本一致时写入成功且版本 +1", second.ok === true && second.version === 2);
+    check("V3 旧版本写入返回冲突且数据不被覆盖", stale.ok === false && (await store.getUserData(uid)).user.totalQuestions === 3);
+    const legacyVersion = await store.saveUserData(uid, doc(4));
+    const now = await store.getUserDataWithVersion(uid);
+    check("V4 不带版本的旧接口保存也使版本 +1", legacyVersion === 3 && now.version === 3 && now.data.user.totalQuestions === 4);
+  }
+  {
+    const dir = makeDataDir();
+    fs.writeFileSync(dbFile(dir), JSON.stringify(seedDb())); // 旧库：有 appData，没有 appDataVersion
+    const store = loadStore(dir);
+    const cur = await store.getUserDataWithVersion("aid");
+    check("V5 旧库已有数据视为版本 1（与 PG 导入口径一致）", !!cur && cur.version === 1 && cur.data.user.totalQuestions === 5);
+    const res = await store.saveUserDataVersioned("aid", { user: { name: "Alice", totalQuestions: 6 }, errors: [], dailyHistory: [] }, 1);
+    check("V5 旧库按版本 1 可正常保存", res.ok === true && res.version === 2);
+  }
+  {
+    const dir = makeDataDir();
+    const bad = JSON.stringify({ users: {}, sessions: {}, appData: {}, appDataVersion: [] });
+    fs.writeFileSync(dbFile(dir), bad);
+    const store = loadStore(dir);
+    const err = await throws(() => store.saveUserDataVersioned("x", { user: {}, errors: [], dailyHistory: [] }, 0));
+    check("V6 appDataVersion 结构非法时拒绝写入且不覆盖", err !== null && readRaw(dbFile(dir)) === bad);
+  }
 }
 
 main()
