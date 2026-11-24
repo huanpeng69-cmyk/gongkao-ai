@@ -199,6 +199,56 @@ export async function listUsage(userId: string): Promise<PgUsageRecord[]> {
   }));
 }
 
+// ==================== 阶段 2b：作答流水 ====================
+
+export type PgAnswerRecord = {
+  id: string;
+  userId: string;
+  questionId: string;
+  module: string | null;
+  subModule: string | null;
+  userAnswer: string | null;
+  isCorrect: boolean;
+  isReview: boolean;
+  minutesSpent: number | null;
+  answeredAt: string;
+  localDate: string;
+};
+
+/** 追加一条作答流水。只写不读，失败让调用方决定是否降级（路由层选择不阻塞答题）。 */
+export async function insertAnswerRecord(record: PgAnswerRecord): Promise<void> {
+  await pool().query(
+    `INSERT INTO answer_records
+       (id, user_id, question_id, module, sub_module, user_answer, is_correct, is_review, minutes_spent, answered_at, local_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      record.id,
+      record.userId,
+      record.questionId,
+      record.module,
+      record.subModule,
+      record.userAnswer,
+      record.isCorrect,
+      record.isReview,
+      record.minutesSpent,
+      record.answeredAt,
+      record.localDate,
+    ],
+  );
+}
+
+/** 统计某用户某本地日期的作答条数与正确数，用于校验与后续日报聚合。 */
+export async function countAnswerRecords(userId: string, localDate: string): Promise<{ total: number; correct: number }> {
+  const result = await pool().query<{ total: string; correct: string }>(
+    `SELECT count(*)::text AS total,
+            count(*) FILTER (WHERE is_correct)::text AS correct
+       FROM answer_records
+      WHERE user_id = $1 AND local_date = $2`,
+    [userId, localDate],
+  );
+  return { total: Number(result.rows[0]?.total ?? 0), correct: Number(result.rows[0]?.correct ?? 0) };
+}
+
 /** 测试与运维用：关闭连接池。 */
 export async function closePool() {
   if (globalForPg.__gongkaoPgPool) {

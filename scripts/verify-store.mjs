@@ -210,6 +210,32 @@ async function main() {
     const now = await store.getUserDataWithVersion(uid);
     check("V4 不带版本的旧接口保存也使版本 +1", legacyVersion === 3 && now.version === 3 && now.data.user.totalQuestions === 4);
   }
+  // --- A：作答流水（阶段 2b，JSON 驱动与 PG 行为一致） ---
+  {
+    const dir = makeDataDir();
+    const store = loadStore(dir);
+    const u = await store.createUser({ username: "ans", displayName: "Ans", password: "secret1" });
+    const uid = u.user.id;
+    const today = "2026-11-24";
+    await store.recordAnswer({ userId: uid, questionId: "q1", module: "判断推理", isCorrect: true, minutesSpent: 0.5, localDate: today });
+    await store.recordAnswer({ userId: uid, questionId: "q2", module: "资料分析", isCorrect: false, minutesSpent: 1.25, localDate: today });
+    await store.recordAnswer({ userId: uid, questionId: "q1", module: "判断推理", isCorrect: true, isReview: true, localDate: today });
+    const counted = await store.countAnswers(uid, today);
+    check("A1 作答流水按日聚合（3 条，2 对）", counted.total === 3 && counted.correct === 2);
+
+    const raw = JSON.parse(readRaw(dbFile(dir)));
+    const rows = raw.answerRecords.filter((r) => r.userId === uid);
+    check("A2 落库字段正确（复习标记、耗时 1 位小数）", rows.length === 3 && rows.filter((r) => r.isReview).length === 1 && rows.some((r) => r.minutesSpent === 1.3));
+
+    await store.recordAnswer({ userId: uid, questionId: "q3", isCorrect: true, minutesSpent: -5, localDate: today });
+    await store.recordAnswer({ userId: uid, questionId: "q4", isCorrect: true, minutesSpent: Number.NaN, localDate: today });
+    const raw2 = JSON.parse(readRaw(dbFile(dir)));
+    const nullMinutes = raw2.answerRecords.filter((r) => r.userId === uid && ["q3", "q4"].includes(r.questionId) && r.minutesSpent === null).length;
+    check("A4 非正数 / NaN 耗时存 null", nullMinutes === 2);
+
+    const v = await store.createUser({ username: "ans2", displayName: "Ans2", password: "secret1" });
+    check("A5 其他用户的作答流水互不可见", (await store.countAnswers(v.user.id, today)).total === 0);
+  }
   {
     const dir = makeDataDir();
     fs.writeFileSync(dbFile(dir), JSON.stringify(seedDb())); // 旧库：有 appData，没有 appDataVersion

@@ -38,6 +38,8 @@ type Database = {
   // 学习数据版本号（乐观锁）。旧库没有此字段：已有数据视为版本 1。
   appDataVersion: Record<string, number>;
   usage: UsageRecord[];
+  // 阶段 2b：作答流水（JSON 驱动）。旧库没有此字段，按需初始化为空数组。
+  answerRecords?: AnswerRecord[];
 };
 
 // 存储驱动：json（默认，单实例 users.json）| pg（PostgreSQL，见 docs/decisions/2026-11-23-database-migration.md）。
@@ -85,7 +87,8 @@ async function readDatabase(): Promise<Database> {
     (parsed.sessions !== undefined && !isPlainObject(parsed.sessions)) ||
     (parsed.appData !== undefined && !isPlainObject(parsed.appData)) ||
     (parsed.appDataVersion !== undefined && !isPlainObject(parsed.appDataVersion)) ||
-    (parsed.usage !== undefined && !Array.isArray(parsed.usage))
+    (parsed.usage !== undefined && !Array.isArray(parsed.usage)) ||
+    (parsed.answerRecords !== undefined && !Array.isArray(parsed.answerRecords))
   ) {
     throw new Error(`用户数据库结构非法，已拒绝任何写入以便人工恢复: ${databasePath}`);
   }
@@ -96,6 +99,8 @@ async function readDatabase(): Promise<Database> {
     appData: (parsed.appData as Database["appData"] | undefined) ?? {},
     appDataVersion: (parsed.appDataVersion as Database["appDataVersion"] | undefined) ?? {},
     usage: (parsed.usage as Database["usage"] | undefined) ?? [],
+    // 阶段 2b：作答流水。旧库没有此字段，读取时按需补空数组，与其它字段口径一致。
+    answerRecords: (parsed.answerRecords as Database["answerRecords"] | undefined) ?? [],
   };
 }
 
@@ -342,6 +347,77 @@ export async function recordUsage(input: {
       db.usage = keep;
     }
   });
+}
+
+// ==================== 阶段 2b：作答流水 ====================
+
+export type AnswerRecord = {
+  id: string;
+  userId: string;
+  questionId: string;
+  module: string | null;
+  subModule: string | null;
+  userAnswer: string | null;
+  isCorrect: boolean;
+  isReview: boolean;
+  minutesSpent: number | null;
+  answeredAt: string;
+  localDate: string;
+};
+
+export type AnswerRecordInput = {
+  userId: string;
+  questionId: string;
+  module?: string | null;
+  subModule?: string | null;
+  userAnswer?: string | null;
+  isCorrect: boolean;
+  isReview?: boolean;
+  minutesSpent?: number | null;
+  localDate: string;
+};
+
+function buildAnswerRecord(input: AnswerRecordInput): AnswerRecord {
+  const minutes = input.minutesSpent;
+  return {
+    id: randomBytes(12).toString("hex"),
+    userId: input.userId,
+    questionId: input.questionId,
+    module: input.module ? input.module.slice(0, 80) : null,
+    subModule: input.subModule ? input.subModule.slice(0, 80) : null,
+    userAnswer: input.userAnswer == null ? null : String(input.userAnswer).slice(0, 200),
+    isCorrect: Boolean(input.isCorrect),
+    isReview: Boolean(input.isReview),
+    // 与客户端口径一致：非有限数或非正数视为未知，存 null 而不是 0，避免污染平均耗时。
+    minutesSpent: typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 10) / 10 : null,
+    answeredAt: new Date().toISOString(),
+    localDate: input.localDate,
+  };
+}
+
+/**
+ * 追加一条作答流水（阶段 2b：先只写不读，为排名/估分/推荐积累原始数据）。
+ * 注意调用方必须自行 try/catch：流水写入失败不能拖垮答题主流程。
+ */
+export async function recordAnswer(input: AnswerRecordInput): Promise<AnswerRecord> {
+  const record = buildAnswerRecord(input);
+  if (usePg()) {
+    await (await pgStore()).insertAnswerRecord(record);
+    return record;
+  }
+  await withFreshDb<void>((db) => {
+    if (!Array.isArray(db.answerRecords)) db.answerRecords = [];
+    db.answerRecords.push(record);
+  });
+  return record;
+}
+
+/** 统计某用户某本地日期的作答条数与正确数（校验与后续日报聚合用）。 */
+export async function countAnswers(userId: string, localDate: string) {
+  if (usePg()) return (await pgStore()).countAnswerRecords(userId, localDate);
+  const db = await readDatabase();
+  const list = (db.answerRecords || []).filter((r) => r.userId === userId && r.localDate === localDate);
+  return { total: list.length, correct: list.filter((r) => r.isCorrect).length };
 }
 
 // 聚合某个用户的用量。时间边界按 UTC+8 归日，与 lib/store.ts 的本地日期口径一致。

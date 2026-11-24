@@ -17,7 +17,9 @@
     "test": "node scripts/verify-store.mjs && node scripts/verify-client-store.mjs",
     "test:pg": "node scripts/verify-store-pg.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
-    "db:import-json": "node scripts/migrate-json-to-pg.mjs"
+    "db:import-json": "node scripts/migrate-json-to-pg.mjs",
+    "smoke:api": "node scripts/smoke-api.mjs",
+    "smoke:answers": "node scripts/smoke-answers.mjs"
   },
   "dependencies": {
     "next": "^14.2.0",

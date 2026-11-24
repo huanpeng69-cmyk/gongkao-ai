@@ -99,6 +99,38 @@ try {
   check("U1 按能力/模型统计", sum.byKind.image.calls === 1 && sum.byModel.m1.calls === 2);
   check("U1 近 14 天序列与最近列表", sum.series.length === 14 && sum.recent.length === 3 && sum.recent[0].kind === "image");
   check("U2 其他用户看不到", (await store.getUsageSummary(b.user.id)).totals.calls === 0);
+
+  // ==================== 阶段 2b：作答流水 ====================
+  const today = "2026-11-24";
+  await store.recordAnswer({ userId: a.user.id, questionId: "q1", module: "判断推理", isCorrect: true, minutesSpent: 0.5, localDate: today });
+  await store.recordAnswer({ userId: a.user.id, questionId: "q2", module: "资料分析", isCorrect: false, minutesSpent: 1.25, localDate: today });
+  await store.recordAnswer({ userId: a.user.id, questionId: "q1", module: "判断推理", isCorrect: true, isReview: true, localDate: today });
+  const counted = await store.countAnswers(a.user.id, today);
+  check("A1 作答流水按日聚合（3 条，2 对）", counted.total === 3 && counted.correct === 2);
+
+  const rows = (await admin.query(
+    "SELECT question_id, is_correct, is_review, minutes_spent FROM answer_records WHERE user_id = $1 AND local_date = $2 ORDER BY question_id",
+    [a.user.id, today],
+  )).rows;
+  check("A2 落库字段正确（复习标记、耗时）", rows.length === 3 && rows.filter((r) => r.is_review).length === 1);
+  check("A3 耗时四舍五入到 1 位小数", rows.some((r) => Number(r.minutes_spent) === 1.3));
+
+  // 非正数/NaN 耗时存 null，不污染平均耗时
+  await store.recordAnswer({ userId: a.user.id, questionId: "q3", isCorrect: true, minutesSpent: -5, localDate: today });
+  await store.recordAnswer({ userId: a.user.id, questionId: "q4", isCorrect: true, minutesSpent: Number.NaN, localDate: today });
+  const nullMinutes = (await admin.query(
+    "SELECT count(*)::int AS n FROM answer_records WHERE user_id = $1 AND question_id IN ('q3','q4') AND minutes_spent IS NULL",
+    [a.user.id],
+  )).rows[0].n;
+  check("A4 非正数 / NaN 耗时存 null", nullMinutes === 2);
+
+  // 用户隔离：另一个用户看不到
+  check("A5 其他用户的作答流水互不可见", (await store.countAnswers(b.user.id, today)).total === 0);
+
+  // 删除用户时级联删除流水
+  await admin.query("DELETE FROM users WHERE id = $1", [b.user.id]);
+  const orphan = (await admin.query("SELECT count(*)::int AS n FROM answer_records WHERE user_id = $1", [b.user.id])).rows[0].n;
+  check("A6 删除用户级联清理作答流水", orphan === 0);
 } catch (error) {
   console.error("测试运行异常：", error);
   fail++;
